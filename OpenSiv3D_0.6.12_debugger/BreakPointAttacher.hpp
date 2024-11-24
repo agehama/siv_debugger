@@ -1,11 +1,15 @@
 ﻿#pragma once
 #include <Windows.h>
+#include "StepHandler.hpp"
 
 enum class BreakPointType
 {
 	Init,
+	Entry,
 	Code,
 	User,
+	StepOver,
+	StepOut,
 };
 
 class BreakPointAttacher
@@ -15,16 +19,39 @@ public:
 	void initializeBreakPointHelper()
 	{
 		m_breakPoints.clear();
-		m_isInitBpOccured = false;
+		m_isFirstBpOccured = false;
+		m_isSecondBpOccured = false;
 		m_resetUserBpAddress = 0;
+
+		m_isBeingSingleInstruction = false;
+		m_isBeingStepOut = false;
+		m_isBeingStepOver = false;
 	}
 
 	BreakPointType getBreakPointType(size_t address)
 	{
-		if (not m_isInitBpOccured)
+		// プロセス起動直後に自動で呼ばれるブレークポイント
+		if (not m_isFirstBpOccured)
 		{
-			m_isInitBpOccured = true;
+			m_isFirstBpOccured = true;
 			return BreakPointType::Init;
+		}
+
+		// Main()の先頭に張ったブレークポイント
+		if (not m_isSecondBpOccured)
+		{
+			m_isSecondBpOccured = true;
+			return BreakPointType::Entry;
+		}
+
+		if (m_stepOverBp && m_stepOverBp.value().first == address)
+		{
+			return BreakPointType::StepOver;
+		}
+
+		if (m_stepOutBp && m_stepOutBp.value().first == address)
+		{
+			return BreakPointType::StepOut;
 		}
 
 		for (const auto& breakPoint : m_breakPoints)
@@ -68,6 +95,44 @@ public:
 		//printHex(address, false);
 		//std::cout << "にはブレークポイントがセットされていません" << std::endl;
 		return false;
+	}
+
+	void setStepOverBreakPointAt(HANDLE process, size_t address)
+	{
+		BreakPoint bp;
+		bp.first = address;
+		bp.second = setBreakPointAt(process, address);
+		m_stepOverBp = bp;
+	}
+
+	void cancelStepOverBreakPoint(HANDLE process)
+	{
+		if (m_stepOverBp)
+		{
+			const auto& bp = m_stepOverBp.value();
+			recoverBreakPoint(process, bp.first, bp.second);
+			m_stepOverBp = none;
+		}
+		//m_isBeingStepOver = false;
+	}
+
+	void setStepOutBreakPointAt(HANDLE process, size_t address)
+	{
+		BreakPoint bp;
+		bp.first = address;
+		bp.second = setBreakPointAt(process, address);
+		m_stepOutBp = bp;
+	}
+
+	void cancelStepOutBreakPoint(HANDLE process)
+	{
+		if (m_stepOutBp)
+		{
+			const auto& bp = m_stepOutBp.value();
+			recoverBreakPoint(process, bp.first, bp.second);
+			m_stepOutBp = none;
+		}
+		//m_isBeingStepOut = false;
 	}
 
 	bool recoverUserBreakPoint(HANDLE process, size_t address)
@@ -120,7 +185,17 @@ public:
 		return m_breakPoints;
 	}
 
+	bool isBeingStepOver() const { return m_isBeingStepOver; }
+	void setBeingStepOver(bool value) { m_isBeingStepOver = value; }
+
+	bool isBeingSingleInstruction() const { return m_isBeingSingleInstruction; }
+	void setBeingSingleInstruction(bool value) { m_isBeingSingleInstruction = value; }
+
+	bool isBeingStepOut() const { return m_isBeingStepOut; }
+	void setBeingStepOut(bool value) { m_isBeingStepOut = value; }
+
 private:
+
 	uint8_t setBreakPointAt(HANDLE process, size_t address)
 	{
 		auto pAddress = reinterpret_cast<LPVOID>(address);
@@ -142,7 +217,16 @@ private:
 		WriteProcessMemory(process, pAddress, &original, 1, &numOfBytes);
 	}
 
+	using BreakPoint = std::pair<size_t, uint8_t>;
+
 	HashTable<size_t, uint8_t> m_breakPoints; // アドレス→元のバイト値
-	bool m_isInitBpOccured = false;
+	Optional<BreakPoint> m_stepOverBp;
+	Optional<BreakPoint> m_stepOutBp;
+	bool m_isFirstBpOccured = false;
+	bool m_isSecondBpOccured = false;
 	Optional<size_t> m_resetUserBpAddress;
+
+	bool m_isBeingStepOver = false;
+	bool m_isBeingStepOut = false;
+	bool m_isBeingSingleInstruction = false;
 };

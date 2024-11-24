@@ -1,28 +1,30 @@
 ﻿#pragma once
 #include <Windows.h>
+#include <Siv3D.hpp>
 
 class RegisterHandler
 {
 public:
 
-	static bool getDebuggeeContext(CONTEXT* pContext, HANDLE thread)
+	static Optional<CONTEXT> getDebuggeeContext(HANDLE thread)
 	{
-		pContext->ContextFlags = CONTEXT_FULL;
+		CONTEXT context = {};
+		context.ContextFlags = CONTEXT_FULL;
 
-		if (not GetThreadContext(thread, pContext))
+		if (not GetThreadContext(thread, &context))
 		{
-			std::cout << "GetThreadContext failed: " << GetLastError() << std::endl;
-			return false;
+			Console << U"GetThreadContext failed: " << GetLastError();
+			return none;
 		}
 
-		return true;
+		return context;
 	}
 
-	static bool setDebuggeeContext(CONTEXT* pContext, HANDLE thread)
+	static bool setDebuggeeContext(HANDLE thread, const CONTEXT& context)
 	{
-		if (not SetThreadContext(thread, pContext))
+		if (not SetThreadContext(thread, &context))
 		{
-			std::cout << "SetThreadContext failed: " << GetLastError() << std::endl;
+			Console << U"SetThreadContext failed: " << GetLastError();
 			return false;
 		}
 
@@ -31,35 +33,21 @@ public:
 
 	static void setTrapFlag(HANDLE thread)
 	{
-		CONTEXT context;
-
-		if (not getDebuggeeContext(&context, thread))
+		if (auto contextOpt = getDebuggeeContext(thread))
 		{
-			return;
-		}
-
-		context.EFlags |= 0x100;
-
-		if (not setDebuggeeContext(&context, thread))
-		{
-			return;
+			auto context = contextOpt.value();
+			context.EFlags |= 0x100; // TFビット
+			setDebuggeeContext(thread, context);
 		}
 	}
 
-	static void rollbackIP(HANDLE thread)
+	static void backDebuggeeRip(HANDLE thread)
 	{
-		CONTEXT context;
-
-		if (not getDebuggeeContext(&context, thread))
+		if (auto contextOpt = getDebuggeeContext(thread))
 		{
-			return;
-		}
-
-		context.Rip -= 1;
-
-		if (not setDebuggeeContext(&context, thread))
-		{
-			return;
+			auto context = contextOpt.value();
+			context.Rip -= 1;
+			setDebuggeeContext(thread, context);
 		}
 	}
 };

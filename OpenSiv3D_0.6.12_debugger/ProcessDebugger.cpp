@@ -21,6 +21,7 @@ bool ProcessDebugger::startDebugSession(const FilePathView exeFilePath)
 		NULL,
 		FALSE,
 		DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE | CREATE_SUSPENDED,
+		//DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE,
 		NULL,
 		NULL,
 		&si,
@@ -32,13 +33,16 @@ bool ProcessDebugger::startDebugSession(const FilePathView exeFilePath)
 	}
 
 	m_process = pi.hProcess;
-	m_mainThread = pi.hThread;
 	m_processID = pi.dwProcessId;
 	m_mainThreadID = pi.dwThreadId;
-	m_threadIDMap[m_mainThreadID] = m_mainThread;
-	m_processStatus = ProcessStatus::Suspended;
+	m_userMainThreadID = 0;
+	m_threadIDMap[m_mainThreadID] = pi.hThread;
+	m_processStatus = ProcessStatus::Interrupted;
 
 	m_stoppedThreadID = m_mainThreadID;
+	ResumeThread(pi.hThread);
+	handledException(true);
+
 	return true;
 }
 
@@ -56,7 +60,8 @@ void ProcessDebugger::continueDebugSession()
 	}
 	else
 	{
-		ContinueDebugEvent(m_processID, m_stoppedThreadID.value(), DBG_CONTINUE);
+		ContinueDebugEvent(m_processID, m_stoppedThreadID.value(), m_alwaysContinue ? DBG_CONTINUE : m_continueStatus);
+		m_alwaysContinue = false;
 	}
 
 	DEBUG_EVENT debugEvent;
@@ -65,7 +70,7 @@ void ProcessDebugger::continueDebugSession()
 	{
 		if (dispatchDebugEvent(&debugEvent))
 		{
-			ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, DBG_CONTINUE);
+			ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, m_continueStatus);
 		}
 		else
 		{
@@ -74,16 +79,109 @@ void ProcessDebugger::continueDebugSession()
 	}
 }
 
+void ProcessDebugger::requestDebugBreak()
+{
+	m_requestBreak = true;
+
+	SuspendThread(m_threadIDMap[m_userMainThreadID]);
+	RegisterHandler::setTrapFlag(m_threadIDMap[m_userMainThreadID]);
+	m_breakPointAttacher.setBeingSingleInstruction(true);
+	ResumeThread(m_threadIDMap[m_userMainThreadID]);
+}
+
 void ProcessDebugger::suspend()
 {
-	SuspendThread(m_threadIDMap[m_mainThreadID]);
+	SuspendThread(m_threadIDMap[m_userMainThreadID]);
 	Print << U"SUSPENDED";
-	m_stoppedThreadID = m_mainThreadID;
+	m_stoppedThreadID = m_userMainThreadID;
 }
 
 void ProcessDebugger::resume()
 {
-	ResumeThread(m_threadIDMap[m_mainThreadID]);
+	if (m_stoppedThreadID)
+	{
+		ResumeThread(m_threadIDMap[m_stoppedThreadID.value()]);
+		m_stoppedThreadID = none;
+	}
+}
+
+void ProcessDebugger::stepIn()
+{
+	if (m_processStatus == ProcessStatus::None)
+	{
+		Console << U"プロセスを開始していません";
+		return;
+	}
+
+	//auto& currentThread = m_threadIDMap[m_stoppedThreadID.value()];
+	auto& currentThread = m_threadIDMap[m_userMainThreadID];
+	m_stepHandler.saveCurrentLineInfo(m_process, currentThread);
+
+	RegisterHandler::setTrapFlag(currentThread);
+	m_breakPointAttacher.setBeingSingleInstruction(true);
+
+	//continueDebugSession();
+}
+
+void ProcessDebugger::stepOver()
+{
+	if (m_processStatus == ProcessStatus::None)
+	{
+		Console << U"プロセスを開始していません";
+		return;
+	}
+
+	auto& currentThread = m_threadIDMap[m_userMainThreadID];
+
+	auto contextOpt = RegisterHandler::getDebuggeeContext(currentThread);
+	if (!contextOpt)
+	{
+		return;
+	}
+
+	const auto& context = contextOpt.value();
+
+	m_stepHandler.saveCurrentLineInfo(m_process, currentThread);
+
+	m_breakPointAttacher.setBeingStepOver(true);
+
+	// CALL命令→CALLの実行後にブレーク
+	if (auto callLenhOpt = m_symbolExplorer.tryGetCallInstructionBytesLength(context.Rip))
+	{
+		m_breakPointAttacher.setStepOverBreakPointAt(m_process, context.Rip + callLenhOpt.value());
+		m_breakPointAttacher.setBeingSingleInstruction(false);
+	}
+	// CALL以外→シングルステップ実行
+	else
+	{
+		RegisterHandler::setTrapFlag(currentThread);
+		m_breakPointAttacher.setBeingSingleInstruction(true);
+	}
+}
+
+void ProcessDebugger::stepOut()
+{
+	auto& currentThread = m_threadIDMap[m_userMainThreadID];
+	m_stepHandler.saveCurrentLineInfo(m_process, currentThread);
+
+	m_breakPointAttacher.setBeingStepOut(true);
+	m_breakPointAttacher.setBeingSingleInstruction(false);
+
+	// 現在の関数のret命令にブレークポイントを張る
+	if (auto retOpt = m_symbolExplorer.getRetInstructionAddress(currentThread))
+	{
+		m_breakPointAttacher.setStepOutBreakPointAt(m_process, retOpt.value());
+	}
+}
+
+const String& ProcessDebugger::currentFilename()
+{
+	return m_stepHandler.lastLineInfo().fileName;
+}
+
+int ProcessDebugger::currentLine()
+{
+	return m_stepHandler.lastLineInfo().lineNumber;
 }
 
 bool ProcessDebugger::dispatchDebugEvent(const DEBUG_EVENT* debugEvent)
@@ -102,7 +200,7 @@ bool ProcessDebugger::dispatchDebugEvent(const DEBUG_EVENT* debugEvent)
 	{
 		//Console << U"EXCEPTION_DEBUG_EVENT";
 		auto isContinue = onException(&debugEvent->u.Exception, debugEvent->dwThreadId);
-		if (!isContinue)
+		if (not isContinue)
 		{
 			m_stoppedThreadID = debugEvent->dwThreadId;
 		}
@@ -137,8 +235,9 @@ bool ProcessDebugger::dispatchDebugEvent(const DEBUG_EVENT* debugEvent)
 bool ProcessDebugger::onProcessCreated(const CREATE_PROCESS_DEBUG_INFO* pInfo)
 {
 	m_breakPointAttacher.initializeBreakPointHelper();
+	m_stepHandler.initializeSingleStepHelper();
 
-	if (m_symbolExplorer.init(pInfo))
+	if (m_symbolExplorer.init(pInfo, m_process))
 	{
 		if (auto entryPointOpt = m_symbolExplorer.findAddress(U"Main"))
 		{
@@ -182,7 +281,7 @@ bool ProcessDebugger::onException(const EXCEPTION_DEBUG_INFO* pInfo, DWORD threa
 	case EXCEPTION_BREAKPOINT:
 		return onBreakPoint(pInfo, threadID);
 	case EXCEPTION_SINGLE_STEP:
-		return onSingleStep(pInfo);
+		return onSingleStep(pInfo, threadID);
 	case EXCEPTION_ACCESS_VIOLATION: Console << U"EXCEPTION_ACCESS_VIOLATION\n"; break;
 	case EXCEPTION_DATATYPE_MISALIGNMENT: Console << U"EXCEPTION_DATATYPE_MISALIGNMENT\n"; break;
 	case EXCEPTION_ARRAY_BOUNDS_EXCEEDED: Console << U"EXCEPTION_ARRAY_BOUNDS_EXCEEDED\n"; break;
@@ -229,39 +328,201 @@ bool ProcessDebugger::onException(const EXCEPTION_DEBUG_INFO* pInfo, DWORD threa
 
 bool ProcessDebugger::onBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD threadID)
 {
-	Console << U"onBreakPoint";
+	Console << U"onBreakPoint thread: " << threadID;
 
-	// 命令を元に戻す
-	if (m_breakPointAttacher.recoverUserBreakPoint(m_process, std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress)))
+	const auto breadAddress = std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress);
+	const auto bpType = m_breakPointAttacher.getBreakPointType(breadAddress);
+
+	m_symbolExplorer.getRetInstructionAddress(m_threadIDMap[threadID]);
+	switch (bpType)
 	{
-		//　再セット用にアドレスを持っておく
-		m_breakPointAttacher.saveResetUserBreakPoint(std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress));
+	case BreakPointType::Init:
+		handledException(true);
+		return true;
 
-		// breakpoint実行後に元の命令が実行されるように1バイト引いて戻す
-		RegisterHandler::rollbackIP(m_threadIDMap[threadID]);
+	case BreakPointType::Entry:
+		m_userMainThreadID = threadID;
+		handledException(true);
+		return true;
 
-		// 次の命令で止めてブレークポイントを復元する
-		RegisterHandler::setTrapFlag(m_threadIDMap[threadID]);
+	case BreakPointType::Code:
+		return onNormalBreakPoint(pInfo, threadID);
+
+	case BreakPointType::User:
+		return onUserBreakPoint(pInfo, threadID);
+
+	case BreakPointType::StepOver:
+		m_breakPointAttacher.cancelStepOverBreakPoint(m_process);
+		RegisterHandler::backDebuggeeRip(m_threadIDMap[threadID]);
+		return handleSingleStep(threadID);
+
+	case BreakPointType::StepOut:
+		return onStepOutBreakPoint(pInfo, threadID);
+
+	default: return true;
+	}
+}
+
+bool ProcessDebugger::onNormalBreakPoint(const EXCEPTION_DEBUG_INFO*, DWORD)
+{
+	// DebugBreakProcess
+	//if (m_requestBreak)
+	//{
+	//	// 新規スレッドで止まるのでメインスレッドでブレークし直す
+	//	m_requestBreak = false;
+	//	RegisterHandler::setTrapFlag(m_mainThread);
+	//	//m_breakPointAttacher.setBeingSingleInstruction(true);
+	//	return true;
+	//}
+
+	if (m_breakPointAttacher.isBeingSingleInstruction())
+	{
+		handledException(true);
+		return true;
+	}
+
+	if (m_breakPointAttacher.isBeingStepOver())
+	{
+		m_breakPointAttacher.cancelStepOverBreakPoint(m_process);
+		m_breakPointAttacher.setBeingStepOver(false);
+	}
+
+	if (m_breakPointAttacher.isBeingStepOut())
+	{
+		m_breakPointAttacher.cancelStepOutBreakPoint(m_process);
+		m_breakPointAttacher.setBeingStepOut(false);
 	}
 
 	//Console << U"A break point occured at ";
 	//printHex(std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress), false);
 	//Console << U".";
 
+	m_alwaysContinue = true;
+
 	m_processStatus = ProcessStatus::Interrupted;
 	return false;
 }
 
-bool ProcessDebugger::onSingleStep(const EXCEPTION_DEBUG_INFO*)
+bool ProcessDebugger::onUserBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD threadID)
 {
-	Console << U"onSingleStep";
+	const auto breakAddress = std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress);
+	// 命令を元に戻す
+	if (m_breakPointAttacher.recoverUserBreakPoint(m_process, breakAddress))
+	{
+		// breakpoint実行後に元の命令が実行されるように1バイト引いて戻す
+		RegisterHandler::backDebuggeeRip(m_threadIDMap[threadID]);
+
+		// 次の命令で止めてブレークポイントを復元する
+		RegisterHandler::setTrapFlag(m_threadIDMap[threadID]);
+
+		//　再セット用にアドレスを持っておく
+		m_breakPointAttacher.saveResetUserBreakPoint(breakAddress);
+
+		return onNormalBreakPoint(pInfo, threadID);
+	}
+
+	//通らないはず
+	assert(false);
+	return false;
+
+	//Console << U"A break point occured at ";
+	//printHex(std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress), false);
+	//Console << U".";
+
+	//m_processStatus = ProcessStatus::Interrupted;
+	//return false;
+}
+
+bool ProcessDebugger::onStepOutBreakPoint(const EXCEPTION_DEBUG_INFO*, DWORD threadID)
+{
+	m_breakPointAttacher.cancelStepOutBreakPoint(m_process);
+
+	RegisterHandler::backDebuggeeRip(m_threadIDMap[threadID]);
+
+	CONTEXT context = {};
+	GetThreadContext(m_threadIDMap[threadID], &context);
+
+	if (auto retLengthOpt = m_symbolExplorer.retInstructionLength(context.Rip))
+	{
+		size_t retAddress;
+		size_t numOfBytes;
+		auto pAddress = reinterpret_cast<LPVOID>(context.Rip);
+		ReadProcessMemory(m_process, pAddress, &retAddress, sizeof(size_t), &numOfBytes);
+
+		m_breakPointAttacher.setStepOutBreakPointAt(m_process, retAddress);
+
+		handledException(true);
+
+		return true;
+	}
+
+	m_breakPointAttacher.setBeingStepOut(false);
+
+	m_alwaysContinue = true;
+	m_processStatus = ProcessStatus::Interrupted;
+	return false;
+}
+
+bool ProcessDebugger::onSingleStep(const EXCEPTION_DEBUG_INFO*, DWORD threadID)
+{
+	Console << U"onSingleStep thread: " << threadID;
 
 	if (m_breakPointAttacher.needResetBreakPoint())
 	{
 		m_breakPointAttacher.resetUserBreakPoint(m_process);
 	}
 
+	if (m_breakPointAttacher.isBeingSingleInstruction())
+	{
+		return handleSingleStep(threadID);
+	}
+
+	handledException(true);
 	return true;
+}
+
+bool ProcessDebugger::handleSingleStep(DWORD threadID)
+{
+	auto& currentThread = m_threadIDMap[threadID];
+	if (not m_stepHandler.isLineChanged(m_process, currentThread))
+	{
+		if (m_breakPointAttacher.isBeingStepOver())
+		{
+			if (auto contextOpt = RegisterHandler::getDebuggeeContext(currentThread))
+			{
+				auto context = contextOpt.value();
+
+				// 関数呼び出しだったら終了後にStepOverブレークポイントを張る
+				if (auto callLenOpt = m_symbolExplorer.tryGetCallInstructionBytesLength(context.Rip))
+				{
+					m_breakPointAttacher.setStepOverBreakPointAt(m_process, context.Rip + callLenOpt.value());
+					m_breakPointAttacher.setBeingSingleInstruction(false);
+				}
+				else
+				{
+					RegisterHandler::setTrapFlag(currentThread);
+					m_breakPointAttacher.setBeingSingleInstruction(true);
+				}
+			}
+		}
+		else
+		{
+			RegisterHandler::setTrapFlag(currentThread);
+			m_breakPointAttacher.setBeingSingleInstruction(true);
+		}
+
+		handledException(true);
+		return true;
+	}
+
+	if (m_breakPointAttacher.isBeingStepOver())
+	{
+		m_breakPointAttacher.setBeingStepOver(false);
+	}
+
+	m_alwaysContinue = true;
+	m_processStatus = ProcessStatus::Interrupted;
+	return false;
 }
 
 bool ProcessDebugger::onProcessExited(const EXIT_PROCESS_DEBUG_INFO* pInfo)
@@ -273,14 +534,17 @@ bool ProcessDebugger::onProcessExited(const EXIT_PROCESS_DEBUG_INFO* pInfo)
 
 	ContinueDebugEvent(m_processID, m_mainThreadID, DBG_CONTINUE);
 
-	CloseHandle(m_mainThread);
+	CloseHandle(m_threadIDMap[m_mainThreadID]);
 	CloseHandle(m_process);
 
 	m_process = NULL;
-	m_mainThread = NULL;
 	m_processID = 0;
 	m_mainThreadID = 0;
+	m_userMainThreadID = 0;
 	m_processStatus = ProcessStatus::None;
+	m_continueStatus = DBG_EXCEPTION_NOT_HANDLED;
+	m_alwaysContinue = false;
+	m_requestBreak = false;
 
 	m_threadIDMap.clear();
 	m_stoppedThreadID = none;
