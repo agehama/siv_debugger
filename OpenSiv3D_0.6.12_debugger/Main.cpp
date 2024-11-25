@@ -1,5 +1,6 @@
 ﻿#include <Siv3D.hpp> // Siv3D v0.6.12
 #include "ProcessDebugger.hpp"
+#include "UserSourceFiles.hpp"
 
 enum class CommandType
 {
@@ -113,6 +114,11 @@ void Main()
 
 			font(debugger.currentFilename()).draw(0, 100);
 			font(debugger.currentLine()).draw(0, 120);
+
+			if (auto optLineStr = UserSourceFiles::TryGetLine(debugger.currentFilename(), debugger.currentLine() - 1))
+			{
+				font(optLineStr.value().get()).draw(0, 140);
+			}
 		}
 	}
 

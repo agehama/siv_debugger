@@ -326,6 +326,7 @@
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="StepHandler.hpp" />
     <ClInclude Include="SymbolExplorer.hpp" />
+    <ClInclude Include="UserSourceFiles.hpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="App\example\obj\blacksmith.obj">

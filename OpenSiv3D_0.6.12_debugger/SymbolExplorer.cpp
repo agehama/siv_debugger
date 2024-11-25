@@ -3,6 +3,37 @@
 #include <Siv3D.hpp>
 #include "SymbolExplorer.hpp"
 #include "RegisterHandler.hpp"
+#include "UserSourceFiles.hpp"
+#include <Siv3D.hpp>
+
+BOOL __stdcall SourceFilesProc(PSOURCEFILEW pSourceFile, PVOID UserContext)
+{
+	std::wstring str(pSourceFile->FileName);
+	const auto fileNmae = Unicode::FromWstring(str);
+	if (fileNmae.ends_with(U".cpp") || fileNmae.ends_with(U".hpp"))
+	{
+		if (
+			!fileNmae.contains(UR"(vctools)") &&
+			!fileNmae.contains(UR"(minkernel)") &&
+			!fileNmae.contains(UR"(onecore)") &&
+			!fileNmae.contains(UR"(avcore)") &&
+			!fileNmae.contains(UR"(\Program Files)") &&
+			!fileNmae.contains(UR"(\a\_work\1\s\)") &&
+			!fileNmae.contains(UR"(shared\inc\)") &&
+			!fileNmae.contains(UR"(directx)") &&
+			!fileNmae.contains(UR"(VCCRT)") &&
+			!fileNmae.contains(UR"(Siv3D.hpp)") &&
+			!fileNmae.contains(UR"(\include\Siv3D\)") &&
+			!fileNmae.contains(UR"(\include\ThirdParty\)")
+			)
+		{
+			UserSourceFiles::AddFile(Unicode::FromWstring(str));
+			Console << Unicode::FromWstring(str);
+		}
+	}
+
+	return true;
+}
 
 bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process)
 {
@@ -24,6 +55,13 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 
 		if (moduleAddress != 0)
 		{
+			IMAGEHLP_MODULE64 moduleInfo = {};
+			moduleInfo.SizeOfStruct = sizeof(IMAGEHLP_MODULE64);
+			const auto succeeded = SymGetModuleInfo64(m_process, moduleAddress, &moduleInfo);
+			if (succeeded && moduleInfo.SymType == SYM_TYPE::SymPdb)
+			{
+				SymEnumSourceFilesW(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, SourceFilesProc, this);
+			}
 			return true;
 		}
 		else
