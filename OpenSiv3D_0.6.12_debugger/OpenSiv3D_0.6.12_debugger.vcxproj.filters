@@ -806,5 +806,8 @@
     <ClInclude Include="UserSourceFiles.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="TypeHelper.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

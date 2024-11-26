@@ -333,7 +333,6 @@ bool ProcessDebugger::onBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD thre
 	const auto breadAddress = std::bit_cast<size_t>(pInfo->ExceptionRecord.ExceptionAddress);
 	const auto bpType = m_breakPointAttacher.getBreakPointType(breadAddress);
 
-	m_symbolExplorer.getRetInstructionAddress(m_threadIDMap[threadID]);
 	switch (bpType)
 	{
 	case BreakPointType::Init:
@@ -341,9 +340,15 @@ bool ProcessDebugger::onBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD thre
 		return true;
 
 	case BreakPointType::Entry:
+	{
 		m_userMainThreadID = threadID;
+		if (auto contextOpt = RegisterHandler::getDebuggeeContext(m_threadIDMap[threadID]))
+		{
+			m_symbolExplorer.entryFunc(contextOpt.value().Rip);
+		}
 		handledException(true);
 		return true;
+	}
 
 	case BreakPointType::Code:
 		return onNormalBreakPoint(pInfo, threadID);

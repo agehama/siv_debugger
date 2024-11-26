@@ -13,6 +13,8 @@ public:
 
 	bool init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process);
 
+	void entryFunc(size_t address);
+
 	void dispose();
 
 	Optional<size_t> findAddress(const String& symbolName) const;

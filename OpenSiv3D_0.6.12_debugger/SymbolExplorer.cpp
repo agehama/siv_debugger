@@ -4,36 +4,298 @@
 #include "SymbolExplorer.hpp"
 #include "RegisterHandler.hpp"
 #include "UserSourceFiles.hpp"
+#include "TypeHelper.hpp"
 #include <Siv3D.hpp>
 
-BOOL __stdcall SourceFilesProc(PSOURCEFILEW pSourceFile, PVOID UserContext)
+namespace
 {
-	std::wstring str(pSourceFile->FileName);
-	const auto fileNmae = Unicode::FromWstring(str);
-	if (fileNmae.ends_with(U".cpp") || fileNmae.ends_with(U".hpp"))
+	// シンボルの仮想アドレスを取得する 
+	// シンボルがローカル変数または引数の場合、 
+	// pSymbol->AddressはRBPに対するオフセットであり、 
+	// 両者を加算するとシンボルの仮想アドレスになる
+	size_t GetSymbolAddress(PSYMBOL_INFO pSymbolInfo, HANDLE processHandle, const CONTEXT& context)
 	{
-		if (
-			!fileNmae.contains(UR"(vctools)") &&
-			!fileNmae.contains(UR"(minkernel)") &&
-			!fileNmae.contains(UR"(onecore)") &&
-			!fileNmae.contains(UR"(avcore)") &&
-			!fileNmae.contains(UR"(\Program Files)") &&
-			!fileNmae.contains(UR"(\a\_work\1\s\)") &&
-			!fileNmae.contains(UR"(shared\inc\)") &&
-			!fileNmae.contains(UR"(directx)") &&
-			!fileNmae.contains(UR"(VCCRT)") &&
-			!fileNmae.contains(UR"(Siv3D.hpp)") &&
-			!fileNmae.contains(UR"(\include\Siv3D\)") &&
-			!fileNmae.contains(UR"(\include\ThirdParty\)")
-			)
+		if ((pSymbolInfo->Flags & SYMFLAG_REGREL) == 0)
 		{
-			UserSourceFiles::AddFile(Unicode::FromWstring(str));
-			Console << Unicode::FromWstring(str);
+			return pSymbolInfo->Address;
 		}
+
+		DWORD64 displacement;
+		SYMBOL_INFO symbolInfo = {};
+		symbolInfo.SizeOfStruct = sizeof(SYMBOL_INFO);
+
+		SymFromAddr(
+			processHandle,
+			context.Rip,
+			&displacement,
+			&symbolInfo);
+
+		// RIPが関数の最初の命令を指している場合、RBPの値は前の関数に属しているため使えない
+		// 代わりにRSP-4をシンボルの基底アドレスとして使用する
+		if (displacement == 0)
+		{
+			return context.Rsp - 4 + pSymbolInfo->Address;
+		}
+
+		return context.Rbp + pSymbolInfo->Address;
 	}
 
-	return true;
+	BOOL __stdcall SourceFilesProc(PSOURCEFILEW pSourceFile, PVOID UserContext)
+	{
+		std::wstring str(pSourceFile->FileName);
+		const auto fileNmae = Unicode::FromWstring(str);
+		if (fileNmae.ends_with(U".cpp") || fileNmae.ends_with(U".hpp"))
+		{
+			if (
+				!fileNmae.contains(UR"(vctools)") &&
+				!fileNmae.contains(UR"(minkernel)") &&
+				!fileNmae.contains(UR"(onecore)") &&
+				!fileNmae.contains(UR"(avcore)") &&
+				!fileNmae.contains(UR"(\Program Files)") &&
+				!fileNmae.contains(UR"(\a\_work\1\s\)") &&
+				!fileNmae.contains(UR"(shared\inc\)") &&
+				!fileNmae.contains(UR"(directx)") &&
+				!fileNmae.contains(UR"(VCCRT)") &&
+				!fileNmae.contains(UR"(Siv3D.hpp)") &&
+				!fileNmae.contains(UR"(\include\Siv3D\)") &&
+				!fileNmae.contains(UR"(\include\ThirdParty\)")
+				)
+			{
+				UserSourceFiles::AddFile(Unicode::FromWstring(str));
+				Console << Unicode::FromWstring(str);
+			}
+		}
+
+		return TRUE;
+	}
+
+	struct VariableInfo
+	{
+		size_t address;
+		size_t modBase;
+		DWORD size;
+		DWORD typeID;
+		String name;
+	};
+
+	struct EnumUserData
+	{
+		Array<VariableInfo> varInfoList;
+		HashSet<String> systemVarNameList;
+		HANDLE process;
+		CONTEXT context;
+	};
+
+	BOOL CALLBACK EnumVariablesCallBack(PSYMBOL_INFO pSymInfo, ULONG SymbolSize, PVOID UserContext)
+	{
+		auto pUserData = reinterpret_cast<EnumUserData*>(UserContext);
+
+		VariableInfo varInfo;
+
+		if (pSymInfo->Tag == SymTagEnum::SymTagData)
+		{
+			varInfo.address = GetSymbolAddress(pSymInfo, pUserData->process, pUserData->context);
+			varInfo.modBase = pSymInfo->ModBase;
+			varInfo.size = SymbolSize;
+			varInfo.typeID = pSymInfo->TypeIndex;
+			varInfo.name = Unicode::FromUTF8(std::string(pSymInfo->Name));
+			if (!varInfo.name.starts_with(UR"(_)") &&
+				!varInfo.name.starts_with(UR"(std::)") &&
+				!varInfo.name.starts_with(UR"(DirectX::)") &&
+				!varInfo.name.starts_with(UR"(s3d::)") &&
+				!varInfo.name.starts_with(UR"(IID_)") &&
+				!varInfo.name.starts_with(UR"(GUID_)") &&
+				!varInfo.name.starts_with(UR"(CLSID_)") &&
+				!varInfo.name.starts_with(UR"(WPD_)") &&
+				!varInfo.name.starts_with(UR"(PKEY_)") &&
+				!varInfo.name.starts_with(UR"(MF)") &&
+				!varInfo.name.starts_with(UR"(L_)") &&
+				!varInfo.name.starts_with(UR"(TID_)") &&
+				!varInfo.name.starts_with(UR"(LIBID_)") &&
+				!varInfo.name.starts_with(UR"(DIID_)") &&
+				!varInfo.name.starts_with(UR"(s_f)") &&
+				!varInfo.name.starts_with(UR"(MMS)") &&
+				!varInfo.name.starts_with(UR"(MMI)") &&
+				!varInfo.name.starts_with(UR"(MDE_)") &&
+				!varInfo.name.starts_with(UR"(Concurrency::)") &&
+				!varInfo.name.starts_with(UR"(ENHANCED_STORAGE_)") &&
+				!varInfo.name.starts_with(UR"(MSBBUILDER_)") &&
+				!varInfo.name.starts_with(UR"(SDPBUILDER_)") &&
+				!varInfo.name.starts_with(UR"(ME_)") &&
+				!varInfo.name.starts_with(UR"(MEDIACACHE_)") &&
+				!varInfo.name.starts_with(UR"(SPROP_)") &&
+				!varInfo.name.starts_with(UR"(PPM_)") &&
+				!varInfo.name.starts_with(UR"(UnDecorator::)") &&
+				!varInfo.name.starts_with(UR"(NETSTREAMSINK_)") &&
+				!varInfo.name.starts_with(UR"(Dload)") &&
+				!varInfo.name.starts_with(UR"(MPEG4_RTP_AU_)") &&
+				!varInfo.name.starts_with(UR"(DPAID_)") &&
+				!varInfo.name.starts_with(UR"(module_)") &&
+				!varInfo.name.starts_with(UR"(DSDEVID_)") &&
+				!varInfo.name.starts_with(UR"(DDVPTYPE_)") &&
+				!varInfo.name.starts_with(UR"(DPSPGUID_)") &&
+				!varInfo.name.starts_with(UR"(FIREWALL_PORT_)") &&
+				!varInfo.name.contains(UR"($)")
+				)
+			{
+				if (!pUserData->systemVarNameList.contains(varInfo.name))
+				{
+					Console << U"U\"" << varInfo.name << U"\",";
+				}
+			}
+			pUserData->varInfoList.push_back(varInfo);
+		}
+
+		return TRUE;
+	}
 }
+
+const char32_t* varNames[] =
+{
+U"enable_percent_n",
+U"DOMAIN_LEAVE_GUID",
+U"MR_AUDIO_RENDER_SERVICE",
+U"init_atexit",
+U"encoded_function_pointers",
+U"w_tzdst_program",
+U"uninit_postmsg",
+U"c_dfDIJoystick2",
+U"errno_no_memory",
+U"DiGenreDeviceOrder",
+U"dststart",
+U"user_matherr",
+U"cereal::detail::StaticObject<cereal::detail::PolymorphicCasters>::instance",
+U"DS3DALG_HRTF_LIGHT",
+U"NAMED_PIPE_EVENT_GUID",
+U"mspdbName",
+U"doserrno_no_memory",
+U"pre_c_initializer",
+U"s_dwAbsMask",
+U"pre_cpp_initializer",
+U"atcount_cdecl",
+U"NO_SUBGROUP_GUID",
+U"pDNameNode::`vftable'",
+U"NETSERVER_UDP_PACKETPAIR_PACKET",
+U"pairNode::`vftable'",
+U"console_ctrl_handler_installed",
+U"g_tss_cv",
+U"type_info::`vftable'",
+U"more_info_string",
+U"term_action",
+U"NvOptimusEnablement",
+U"c",
+U"s",
+U"c_rgodfDIJoy2",
+U"GS_ContextRecord",
+U"NETSERVER_TCP_PACKETPAIR_PACKET",
+U"ProtectionSystemID_MicrosoftPlayReady",
+U"DS3DALG_HRTF_FULL",
+U"KSDATAFORMAT_SUBTYPE_MIDI",
+U"fSystemSet",
+U"c1",
+U"SPDFID_WaveFormatEx",
+U"is_initialized_as_dll",
+U"MR_VOLUME_CONTROL_SERVICE",
+U"USER_POLICY_PRESENT_GUID",
+U"RtlNtPathSeperatorString",
+U"g_tss_srw",
+U"tzname_states",
+U"w_tzstd_program",
+U"tz_api_used",
+U"w_tzname",
+U"AmdPowerXpressRequestHighPerformance",
+U"c23",
+U"KSDATAFORMAT_SUBTYPE_DIRECTMUSIC",
+U"LcidToLocaleNameTable",
+U"block_use_names",
+U"rttiTable",
+U"RtlAlternateDosPathSeperatorString",
+U"ProtectionSystemID_Hdcp2AudioID",
+U"post_pgo_initializer",
+U"errtable",
+U"ProtectionSystemID_Hdcp2VideoID",
+U"NETWORK_MANAGER_LAST_IP_ADDRESS_REMOVAL_GUID",
+U"abort_action",
+U"ctrlbreak_action",
+U"IndirectionName",
+U"CEACTIVATE_ATTRIBUTE_DEFAULT_HRESULT",
+U"EventTraceGuid",
+U"atfuns_cdecl",
+U"MESourceSupportedRatesChanged",
+U"MESourceNeedKey",
+U"LocaleNameToIndexTable",
+U"report_type_messages",
+U"GS_ExceptionPointers",
+U"DS3DALG_NO_VIRTUALIZATION",
+U"heap",
+U"debugCrtFileName",
+U"mspdb",
+U"NETWORK_MANAGER_FIRST_IP_ADDRESS_ARRIVAL_GUID",
+U"SPDFID_Text",
+U"CODECAPI_CAPTURE_SCENARIO",
+U"EventTraceConfigGuid",
+U"DPLPROPERTY_PlayerScore",
+U"MACHINE_POLICY_PRESENT_GUID",
+U"ln2",
+U"PrivateLoggerNotificationGuid",
+U"GS_ExceptionRecord",
+U"tz_info",
+U"RtlDosPathSeperatorsString",
+U"VIDEO_SINK_BROADCASTING_PORT",
+U"pterm",
+U"initlocks",
+U"initlocks",
+U"initlocks",
+U"initlocks",
+U"tzset_init_state",
+U"DPLPROPERTY_PlayerGuid",
+U"function_pointers",
+U"thread_local_exit_callback_func",
+U"tzstd_program",
+U"charNode::`vftable'",
+U"w_tzname_states",
+U"FH4::s_shiftTab",
+U"DOMAIN_JOIN_GUID",
+U"pcharNode::`vftable'",
+U"DNameNode::`vftable'",
+U"ProtectionSystemID_Hdcp2SystemID",
+U"DPLPROPERTY_LobbyGuid",
+U"tokenTable",
+U"heap_validation_pending",
+U"stack_premsg",
+U"FORMAT_MFVideoFormat",
+U"ctrlc_action",
+U"nameTable",
+U"hugexp",
+U"fmt::v8::detail::micro",
+U"dstend",
+U"DefaultTraceSecurityGuid",
+U"uninit_premsg",
+U"c_termination_complete",
+U"PrefixName",
+U"SPGDF_ContextFree",
+U"CUSTOM_SYSTEM_STATE_CHANGE_EVENT_GUID",
+U"SystemTraceControlGuid",
+U"FH4::s_negLengthTab",
+U"pinit",
+U"RPC_INTERFACE_EVENT_GUID",
+U"ndigs",
+U"ndigs",
+U"AM_MEDIA_TYPE_REPRESENTATION",
+U"tzdst_program",
+U"invln2",
+U"last_wide_tz",
+U"DNameStatusNode::`vftable'",
+U"NETMEDIASINK_SAMPLESWITHRTPTIMESTAMPS",
+U"CATID_MARSHALER",
+U"ALL_POWERSCHEMES_GUID",
+U"global_locale",
+U"PACKETIZATION_MODE",
+U"DPLPROPERTY_MessagesSupported",
+U"digits",
+U"digits",
+U"stack_postmsg",
+};
 
 bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process)
 {
@@ -57,10 +319,23 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 		{
 			IMAGEHLP_MODULE64 moduleInfo = {};
 			moduleInfo.SizeOfStruct = sizeof(IMAGEHLP_MODULE64);
-			const auto succeeded = SymGetModuleInfo64(m_process, moduleAddress, &moduleInfo);
-			if (succeeded && moduleInfo.SymType == SYM_TYPE::SymPdb)
+			if (SymGetModuleInfo64(m_process, moduleAddress, &moduleInfo) && moduleInfo.SymType == SYM_TYPE::SymPdb)
 			{
-				SymEnumSourceFilesW(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, SourceFilesProc, this);
+				if (not SymEnumSourceFilesW(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, SourceFilesProc, this))
+				{
+					Console << U"SymEnumSourceFilesW failed: " << GetLastError();
+				}
+
+				EnumUserData userData;
+				const auto num = sizeof(varNames) / sizeof(varNames[0]);
+				for (auto i : step(num))
+				{
+					userData.systemVarNameList.emplace(varNames[i]);
+				}
+				if (not SymEnumSymbols(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, EnumVariablesCallBack, &userData))
+				{
+					Console << U"SymEnumSymbols failed: " << GetLastError();
+				}
 			}
 			return true;
 		}
@@ -75,6 +350,11 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 		Console << U"SymInitialize failed: " << GetLastError();
 		return false;
 	}
+}
+
+void SymbolExplorer::entryFunc(size_t address)
+{
+	//const auto moduleBase = SymGetModuleBase64(m_process, address);
 }
 
 void SymbolExplorer::dispose()
