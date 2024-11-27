@@ -119,12 +119,13 @@
     <ClCompile Include="BreakPointAttacher.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="ProcessDebugger.cpp" />
+    <ClCompile Include="ProcessHandle.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="StepHandler.cpp" />
-    <ClCompile Include="SymbolExplorer.cpp" />
+    <ClCompile Include="ThreadHandle.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="App\engine\texture\box-shadow\128.png" />
@@ -322,10 +323,10 @@
   <ItemGroup>
     <ClInclude Include="BreakPointAttacher.hpp" />
     <ClInclude Include="ProcessDebugger.hpp" />
-    <ClInclude Include="RegisterHandler.hpp" />
+    <ClInclude Include="ProcessHandle.hpp" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="StepHandler.hpp" />
-    <ClInclude Include="SymbolExplorer.hpp" />
+    <ClInclude Include="ThreadHandle.hpp" />
     <ClInclude Include="TypeHelper.hpp" />
     <ClInclude Include="UserSourceFiles.hpp" />
   </ItemGroup>

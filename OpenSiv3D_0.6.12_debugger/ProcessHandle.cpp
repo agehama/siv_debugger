@@ -1,20 +1,11 @@
 ﻿#include <Windows.h>
 #include <DbgHelp.h>
 #include <Siv3D.hpp>
-#include "SymbolExplorer.hpp"
-#include "RegisterHandler.hpp"
+#include "ProcessHandle.hpp"
+#include "ThreadHandle.hpp"
 #include "UserSourceFiles.hpp"
 #include "TypeHelper.hpp"
-#include <Siv3D.hpp>
-
-struct VariableInfo
-{
-	size_t address;
-	size_t modBase;
-	DWORD size;
-	DWORD typeID;
-	String name;
-};
+#include "ProcessHandle.hpp"
 
 namespace
 {
@@ -49,7 +40,7 @@ namespace
 		return context.Rbp + pSymbolInfo->Address;
 	}
 
-	BOOL __stdcall SourceFilesProc(PSOURCEFILEW pSourceFile, PVOID UserContext)
+	BOOL __stdcall SourceFilesProc(PSOURCEFILEW pSourceFile, PVOID)
 	{
 		std::wstring str(pSourceFile->FileName);
 		const auto fileNmae = Unicode::FromWstring(str);
@@ -149,166 +140,169 @@ namespace
 
 		return TRUE;
 	}
+
+	const char32_t* systemVarNames[] =
+	{
+		U"enable_percent_n",
+		U"DOMAIN_LEAVE_GUID",
+		U"MR_AUDIO_RENDER_SERVICE",
+		U"init_atexit",
+		U"encoded_function_pointers",
+		U"w_tzdst_program",
+		U"uninit_postmsg",
+		U"c_dfDIJoystick2",
+		U"errno_no_memory",
+		U"DiGenreDeviceOrder",
+		U"dststart",
+		U"user_matherr",
+		U"cereal::detail::StaticObject<cereal::detail::PolymorphicCasters>::instance",
+		U"DS3DALG_HRTF_LIGHT",
+		U"NAMED_PIPE_EVENT_GUID",
+		U"mspdbName",
+		U"doserrno_no_memory",
+		U"pre_c_initializer",
+		U"s_dwAbsMask",
+		U"pre_cpp_initializer",
+		U"atcount_cdecl",
+		U"NO_SUBGROUP_GUID",
+		U"pDNameNode::`vftable'",
+		U"NETSERVER_UDP_PACKETPAIR_PACKET",
+		U"pairNode::`vftable'",
+		U"console_ctrl_handler_installed",
+		U"g_tss_cv",
+		U"type_info::`vftable'",
+		U"more_info_string",
+		U"term_action",
+		U"NvOptimusEnablement",
+		U"c",
+		U"s",
+		U"c_rgodfDIJoy2",
+		U"GS_ContextRecord",
+		U"NETSERVER_TCP_PACKETPAIR_PACKET",
+		U"ProtectionSystemID_MicrosoftPlayReady",
+		U"DS3DALG_HRTF_FULL",
+		U"KSDATAFORMAT_SUBTYPE_MIDI",
+		U"fSystemSet",
+		U"c1",
+		U"SPDFID_WaveFormatEx",
+		U"is_initialized_as_dll",
+		U"MR_VOLUME_CONTROL_SERVICE",
+		U"USER_POLICY_PRESENT_GUID",
+		U"RtlNtPathSeperatorString",
+		U"g_tss_srw",
+		U"tzname_states",
+		U"w_tzstd_program",
+		U"tz_api_used",
+		U"w_tzname",
+		U"AmdPowerXpressRequestHighPerformance",
+		U"c23",
+		U"KSDATAFORMAT_SUBTYPE_DIRECTMUSIC",
+		U"LcidToLocaleNameTable",
+		U"block_use_names",
+		U"rttiTable",
+		U"RtlAlternateDosPathSeperatorString",
+		U"ProtectionSystemID_Hdcp2AudioID",
+		U"post_pgo_initializer",
+		U"errtable",
+		U"ProtectionSystemID_Hdcp2VideoID",
+		U"NETWORK_MANAGER_LAST_IP_ADDRESS_REMOVAL_GUID",
+		U"abort_action",
+		U"ctrlbreak_action",
+		U"IndirectionName",
+		U"CEACTIVATE_ATTRIBUTE_DEFAULT_HRESULT",
+		U"EventTraceGuid",
+		U"atfuns_cdecl",
+		U"MESourceSupportedRatesChanged",
+		U"MESourceNeedKey",
+		U"LocaleNameToIndexTable",
+		U"report_type_messages",
+		U"GS_ExceptionPointers",
+		U"DS3DALG_NO_VIRTUALIZATION",
+		U"heap",
+		U"debugCrtFileName",
+		U"mspdb",
+		U"NETWORK_MANAGER_FIRST_IP_ADDRESS_ARRIVAL_GUID",
+		U"SPDFID_Text",
+		U"CODECAPI_CAPTURE_SCENARIO",
+		U"EventTraceConfigGuid",
+		U"DPLPROPERTY_PlayerScore",
+		U"MACHINE_POLICY_PRESENT_GUID",
+		U"ln2",
+		U"PrivateLoggerNotificationGuid",
+		U"GS_ExceptionRecord",
+		U"tz_info",
+		U"RtlDosPathSeperatorsString",
+		U"VIDEO_SINK_BROADCASTING_PORT",
+		U"pterm",
+		U"initlocks",
+		U"initlocks",
+		U"initlocks",
+		U"initlocks",
+		U"tzset_init_state",
+		U"DPLPROPERTY_PlayerGuid",
+		U"function_pointers",
+		U"thread_local_exit_callback_func",
+		U"tzstd_program",
+		U"charNode::`vftable'",
+		U"w_tzname_states",
+		U"FH4::s_shiftTab",
+		U"DOMAIN_JOIN_GUID",
+		U"pcharNode::`vftable'",
+		U"DNameNode::`vftable'",
+		U"ProtectionSystemID_Hdcp2SystemID",
+		U"DPLPROPERTY_LobbyGuid",
+		U"tokenTable",
+		U"heap_validation_pending",
+		U"stack_premsg",
+		U"FORMAT_MFVideoFormat",
+		U"ctrlc_action",
+		U"nameTable",
+		U"hugexp",
+		U"fmt::v8::detail::micro",
+		U"dstend",
+		U"DefaultTraceSecurityGuid",
+		U"uninit_premsg",
+		U"c_termination_complete",
+		U"PrefixName",
+		U"SPGDF_ContextFree",
+		U"CUSTOM_SYSTEM_STATE_CHANGE_EVENT_GUID",
+		U"SystemTraceControlGuid",
+		U"FH4::s_negLengthTab",
+		U"pinit",
+		U"RPC_INTERFACE_EVENT_GUID",
+		U"ndigs",
+		U"ndigs",
+		U"AM_MEDIA_TYPE_REPRESENTATION",
+		U"tzdst_program",
+		U"invln2",
+		U"last_wide_tz",
+		U"DNameStatusNode::`vftable'",
+		U"NETMEDIASINK_SAMPLESWITHRTPTIMESTAMPS",
+		U"CATID_MARSHALER",
+		U"ALL_POWERSCHEMES_GUID",
+		U"global_locale",
+		U"PACKETIZATION_MODE",
+		U"DPLPROPERTY_MessagesSupported",
+		U"digits",
+		U"digits",
+		U"stack_postmsg",
+	};
 }
 
-const char32_t* varNames[] =
+void ProcessHandle::reset()
 {
-U"enable_percent_n",
-U"DOMAIN_LEAVE_GUID",
-U"MR_AUDIO_RENDER_SERVICE",
-U"init_atexit",
-U"encoded_function_pointers",
-U"w_tzdst_program",
-U"uninit_postmsg",
-U"c_dfDIJoystick2",
-U"errno_no_memory",
-U"DiGenreDeviceOrder",
-U"dststart",
-U"user_matherr",
-U"cereal::detail::StaticObject<cereal::detail::PolymorphicCasters>::instance",
-U"DS3DALG_HRTF_LIGHT",
-U"NAMED_PIPE_EVENT_GUID",
-U"mspdbName",
-U"doserrno_no_memory",
-U"pre_c_initializer",
-U"s_dwAbsMask",
-U"pre_cpp_initializer",
-U"atcount_cdecl",
-U"NO_SUBGROUP_GUID",
-U"pDNameNode::`vftable'",
-U"NETSERVER_UDP_PACKETPAIR_PACKET",
-U"pairNode::`vftable'",
-U"console_ctrl_handler_installed",
-U"g_tss_cv",
-U"type_info::`vftable'",
-U"more_info_string",
-U"term_action",
-U"NvOptimusEnablement",
-U"c",
-U"s",
-U"c_rgodfDIJoy2",
-U"GS_ContextRecord",
-U"NETSERVER_TCP_PACKETPAIR_PACKET",
-U"ProtectionSystemID_MicrosoftPlayReady",
-U"DS3DALG_HRTF_FULL",
-U"KSDATAFORMAT_SUBTYPE_MIDI",
-U"fSystemSet",
-U"c1",
-U"SPDFID_WaveFormatEx",
-U"is_initialized_as_dll",
-U"MR_VOLUME_CONTROL_SERVICE",
-U"USER_POLICY_PRESENT_GUID",
-U"RtlNtPathSeperatorString",
-U"g_tss_srw",
-U"tzname_states",
-U"w_tzstd_program",
-U"tz_api_used",
-U"w_tzname",
-U"AmdPowerXpressRequestHighPerformance",
-U"c23",
-U"KSDATAFORMAT_SUBTYPE_DIRECTMUSIC",
-U"LcidToLocaleNameTable",
-U"block_use_names",
-U"rttiTable",
-U"RtlAlternateDosPathSeperatorString",
-U"ProtectionSystemID_Hdcp2AudioID",
-U"post_pgo_initializer",
-U"errtable",
-U"ProtectionSystemID_Hdcp2VideoID",
-U"NETWORK_MANAGER_LAST_IP_ADDRESS_REMOVAL_GUID",
-U"abort_action",
-U"ctrlbreak_action",
-U"IndirectionName",
-U"CEACTIVATE_ATTRIBUTE_DEFAULT_HRESULT",
-U"EventTraceGuid",
-U"atfuns_cdecl",
-U"MESourceSupportedRatesChanged",
-U"MESourceNeedKey",
-U"LocaleNameToIndexTable",
-U"report_type_messages",
-U"GS_ExceptionPointers",
-U"DS3DALG_NO_VIRTUALIZATION",
-U"heap",
-U"debugCrtFileName",
-U"mspdb",
-U"NETWORK_MANAGER_FIRST_IP_ADDRESS_ARRIVAL_GUID",
-U"SPDFID_Text",
-U"CODECAPI_CAPTURE_SCENARIO",
-U"EventTraceConfigGuid",
-U"DPLPROPERTY_PlayerScore",
-U"MACHINE_POLICY_PRESENT_GUID",
-U"ln2",
-U"PrivateLoggerNotificationGuid",
-U"GS_ExceptionRecord",
-U"tz_info",
-U"RtlDosPathSeperatorsString",
-U"VIDEO_SINK_BROADCASTING_PORT",
-U"pterm",
-U"initlocks",
-U"initlocks",
-U"initlocks",
-U"initlocks",
-U"tzset_init_state",
-U"DPLPROPERTY_PlayerGuid",
-U"function_pointers",
-U"thread_local_exit_callback_func",
-U"tzstd_program",
-U"charNode::`vftable'",
-U"w_tzname_states",
-U"FH4::s_shiftTab",
-U"DOMAIN_JOIN_GUID",
-U"pcharNode::`vftable'",
-U"DNameNode::`vftable'",
-U"ProtectionSystemID_Hdcp2SystemID",
-U"DPLPROPERTY_LobbyGuid",
-U"tokenTable",
-U"heap_validation_pending",
-U"stack_premsg",
-U"FORMAT_MFVideoFormat",
-U"ctrlc_action",
-U"nameTable",
-U"hugexp",
-U"fmt::v8::detail::micro",
-U"dstend",
-U"DefaultTraceSecurityGuid",
-U"uninit_premsg",
-U"c_termination_complete",
-U"PrefixName",
-U"SPGDF_ContextFree",
-U"CUSTOM_SYSTEM_STATE_CHANGE_EVENT_GUID",
-U"SystemTraceControlGuid",
-U"FH4::s_negLengthTab",
-U"pinit",
-U"RPC_INTERFACE_EVENT_GUID",
-U"ndigs",
-U"ndigs",
-U"AM_MEDIA_TYPE_REPRESENTATION",
-U"tzdst_program",
-U"invln2",
-U"last_wide_tz",
-U"DNameStatusNode::`vftable'",
-U"NETMEDIASINK_SAMPLESWITHRTPTIMESTAMPS",
-U"CATID_MARSHALER",
-U"ALL_POWERSCHEMES_GUID",
-U"global_locale",
-U"PACKETIZATION_MODE",
-U"DPLPROPERTY_MessagesSupported",
-U"digits",
-U"digits",
-U"stack_postmsg",
-};
+	m_processHandle = NULL;
+	m_userGlobalVariables.clear();
+}
 
-bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process)
+bool ProcessHandle::init(const CREATE_PROCESS_DEBUG_INFO* pInfo)
 {
-	//m_process = pInfo->hProcess;
-	m_process = process;
-
 	SymSetOptions(SYMOPT_LOAD_LINES);
 
-	if (SymInitialize(m_process, NULL, FALSE))
+	if (SymInitialize(m_processHandle, NULL, FALSE))
 	{
 		DWORD64 moduleAddress = SymLoadModule64(
-			m_process,
+			m_processHandle,
 			pInfo->hFile,
 			NULL,
 			NULL,
@@ -320,9 +314,9 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 		{
 			IMAGEHLP_MODULE64 moduleInfo = {};
 			moduleInfo.SizeOfStruct = sizeof(IMAGEHLP_MODULE64);
-			if (SymGetModuleInfo64(m_process, moduleAddress, &moduleInfo) && moduleInfo.SymType == SYM_TYPE::SymPdb)
+			if (SymGetModuleInfo64(m_processHandle, moduleAddress, &moduleInfo) && moduleInfo.SymType == SYM_TYPE::SymPdb)
 			{
-				if (not SymEnumSourceFilesW(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, SourceFilesProc, this))
+				if (not SymEnumSourceFilesW(m_processHandle, (DWORD64)pInfo->lpBaseOfImage, NULL, SourceFilesProc, this))
 				{
 					Console << U"SymEnumSourceFilesW failed: " << GetLastError();
 				}
@@ -330,12 +324,12 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 				// グローバル変数リストの取得
 				{
 					EnumUserData userData;
-					const auto num = sizeof(varNames) / sizeof(varNames[0]);
+					const auto num = sizeof(systemVarNames) / sizeof(systemVarNames[0]);
 					for (auto i : step(num))
 					{
-						userData.systemVarNameList.emplace(varNames[i]);
+						userData.systemVarNameList.emplace(systemVarNames[i]);
 					}
-					if (SymEnumSymbols(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, EnumVariablesCallBack, &userData))
+					if (SymEnumSymbols(m_processHandle, (DWORD64)pInfo->lpBaseOfImage, NULL, EnumVariablesCallBack, &userData))
 					{
 						m_userGlobalVariables = std::move(userData.userVarInfoList);
 					}
@@ -360,32 +354,20 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 	}
 }
 
-void SymbolExplorer::entryFunc(size_t address)
+void ProcessHandle::entryFunc(size_t /*address*/)
 {
-	//const auto moduleBase = SymGetModuleBase64(m_process, address);
 }
 
-void SymbolExplorer::dispose()
+void ProcessHandle::dispose()
 {
-	SymCleanup(m_process);
-	m_process = NULL;
+	SymCleanup(m_processHandle);
+	m_processHandle = NULL;
 }
 
-Optional<size_t> SymbolExplorer::findAddress(const String& symbolName) const
-{
-	SYMBOL_INFO symbolInfo = {};
-	symbolInfo.SizeOfStruct = sizeof(SYMBOL_INFO);
-	if (SymFromName(m_process, Unicode::ToUTF8(symbolName).c_str(), &symbolInfo))
-	{
-		return std::bit_cast<size_t>(symbolInfo.Address);
-	}
-	return none;
-}
-
-void SymbolExplorer::onDllLoaded(const LOAD_DLL_DEBUG_INFO* pInfo) const
+void ProcessHandle::onDllLoaded(const LOAD_DLL_DEBUG_INFO* pInfo) const
 {
 	DWORD64 moduleAddress = SymLoadModule64(
-		m_process,
+		m_processHandle,
 		pInfo->hFile,
 		NULL,
 		NULL,
@@ -401,19 +383,30 @@ void SymbolExplorer::onDllLoaded(const LOAD_DLL_DEBUG_INFO* pInfo) const
 	CloseHandle(pInfo->hFile);
 }
 
-void SymbolExplorer::onDllUnloaded(const UNLOAD_DLL_DEBUG_INFO* pInfo) const
+void ProcessHandle::onDllUnloaded(const UNLOAD_DLL_DEBUG_INFO* pInfo) const
 {
-	SymUnloadModule64(m_process, (DWORD64)pInfo->lpBaseOfDll);
+	SymUnloadModule64(m_processHandle, (DWORD64)pInfo->lpBaseOfDll);
 }
 
-Optional<size_t> SymbolExplorer::tryGetCallInstructionBytesLength(size_t address) const
+Optional<size_t> ProcessHandle::findAddress(const String& symbolName) const
+{
+	SYMBOL_INFO symbolInfo = {};
+	symbolInfo.SizeOfStruct = sizeof(SYMBOL_INFO);
+	if (SymFromName(m_processHandle, Unicode::ToUTF8(symbolName).c_str(), &symbolInfo))
+	{
+		return std::bit_cast<size_t>(symbolInfo.Address);
+	}
+	return none;
+}
+
+Optional<size_t> ProcessHandle::tryGetCallInstructionBytesLength(size_t address) const
 {
 	std::uint8_t instruction[10];
 
 	size_t numOfBytes;
 	auto pAddress = reinterpret_cast<LPVOID>(address);
 	ReadProcessMemory(
-		m_process,
+		m_processHandle,
 		pAddress,
 		instruction,
 		sizeof(instruction) / sizeof(std::uint8_t),
@@ -475,9 +468,9 @@ Optional<size_t> SymbolExplorer::tryGetCallInstructionBytesLength(size_t address
 	}
 }
 
-Optional<size_t> SymbolExplorer::getRetInstructionAddress(HANDLE thread) const
+Optional<size_t> ProcessHandle::getRetInstructionAddress(const ThreadHandle& thread) const
 {
-	auto contextOpt = RegisterHandler::getDebuggeeContext(thread);
+	auto contextOpt = thread.getContext();
 	if (not contextOpt)
 	{
 		return none;
@@ -490,7 +483,7 @@ Optional<size_t> SymbolExplorer::getRetInstructionAddress(HANDLE thread) const
 	symbol.SizeOfStruct = sizeof(SYMBOL_INFO);
 
 	if (not SymFromAddr(
-		m_process,
+		m_processHandle,
 		context.Rip,
 		&displacement,
 		&symbol))
@@ -514,12 +507,12 @@ Optional<size_t> SymbolExplorer::getRetInstructionAddress(HANDLE thread) const
 	return none;
 }
 
-Optional<size_t> SymbolExplorer::retInstructionLength(size_t address) const
+Optional<size_t> ProcessHandle::retInstructionLength(size_t address) const
 {
 	std::uint8_t readByte;
 	size_t numOfBytes;
 	auto pAddress = reinterpret_cast<LPVOID>(address);
-	ReadProcessMemory(m_process, pAddress, &readByte, 1, &numOfBytes);
+	ReadProcessMemory(m_processHandle, pAddress, &readByte, 1, &numOfBytes);
 
 	if (readByte == 0xC3 || readByte == 0xCB)
 	{
@@ -534,9 +527,9 @@ Optional<size_t> SymbolExplorer::retInstructionLength(size_t address) const
 	return none;
 }
 
-Optional<LineInfo> SymbolExplorer::GetCurrentLineInfo(HANDLE process, HANDLE thread)
+Optional<LineInfo> ProcessHandle::getCurrentLineInfo(const ThreadHandle& thread) const
 {
-	auto contextOpt = RegisterHandler::getDebuggeeContext(thread);
+	auto contextOpt = thread.getContext();
 	if (not contextOpt)
 	{
 		return none;
@@ -549,7 +542,8 @@ Optional<LineInfo> SymbolExplorer::GetCurrentLineInfo(HANDLE process, HANDLE thr
 	lineInfo.SizeOfStruct = sizeof(lineInfo);
 
 	if (SymGetLineFromAddr64(
-		process,
+		//process,
+		m_processHandle,
 		context.Rip,
 		&displacement,
 		&lineInfo))
@@ -569,4 +563,20 @@ Optional<LineInfo> SymbolExplorer::GetCurrentLineInfo(HANDLE process, HANDLE thr
 	}
 
 	return none;
+}
+
+bool ProcessHandle::readMemory(size_t address, size_t size, LPVOID lpBuffer) const
+{
+	size_t numOfBytes;
+	auto pAddress = reinterpret_cast<LPVOID>(address);
+	return ReadProcessMemory(m_processHandle, pAddress, lpBuffer, size, &numOfBytes);
+}
+
+bool ProcessHandle::writeMemory(size_t address, size_t size, LPCVOID lpBuffer) const
+{
+	size_t numOfBytes;
+	auto pAddress = reinterpret_cast<LPVOID>(address);
+	auto success1 = WriteProcessMemory(m_processHandle, pAddress, lpBuffer, size, &numOfBytes);
+	auto success2 = FlushInstructionCache(m_processHandle, pAddress, size);
+	return success1 && success2;
 }

@@ -1,7 +1,10 @@
 ﻿#pragma once
 #include <Windows.h>
 #include <Siv3D.hpp>
-#include "SymbolExplorer.hpp"
+#include "ProcessHandle.hpp"
+
+class ThreadHandle;
+class ProcessHandle;
 
 class StepHandler
 {
@@ -9,9 +12,9 @@ public:
 
 	void initializeSingleStepHelper();
 
-	void saveCurrentLineInfo(HANDLE process, HANDLE thread);
+	void saveCurrentLineInfo(const ProcessHandle& process, const ThreadHandle& thread);
 
-	bool isLineChanged(HANDLE process, HANDLE thread);
+	bool isLineChanged(const ProcessHandle& process, const ThreadHandle& thread);
 
 	const LineInfo& lastLineInfo()
 	{

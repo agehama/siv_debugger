@@ -125,7 +125,7 @@ void Main()
 	isTerminate = true;
 	if (debugger && debugger.status() != ProcessStatus::None)
 	{
-		DebugBreakProcess(debugger.process());
+		DebugBreakProcess(debugger.process().getHandle());
 	}
 
 	debuggerThread.join();

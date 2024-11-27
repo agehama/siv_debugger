@@ -1,7 +1,8 @@
 ﻿#include <Windows.h>
 #include <DbgHelp.h>
 #include "StepHandler.hpp"
-#include "RegisterHandler.hpp"
+#include "ProcessHandle.hpp"
+#include "ThreadHandle.hpp"
 
 void StepHandler::initializeSingleStepHelper()
 {
@@ -9,22 +10,22 @@ void StepHandler::initializeSingleStepHelper()
 	m_lastLineInfoMap.clear();
 }
 
-void StepHandler::saveCurrentLineInfo(HANDLE process, HANDLE thread)
+void StepHandler::saveCurrentLineInfo(const ProcessHandle& process, const ThreadHandle& thread)
 {
-	if (auto opt = SymbolExplorer::GetCurrentLineInfo(process, thread))
+	if (auto opt = process.getCurrentLineInfo(thread))
 	{
-		m_lastLineInfoMap[thread] = opt.value();
+		m_lastLineInfoMap[thread.getHandle()] = opt.value();
 	}
 	else
 	{
-		m_lastLineInfoMap[thread].fileName = U"";
-		m_lastLineInfoMap[thread].lineNumber = 0;
+		m_lastLineInfoMap[thread.getHandle()].fileName = U"";
+		m_lastLineInfoMap[thread.getHandle()].lineNumber = 0;
 	}
 }
 
-bool StepHandler::isLineChanged(HANDLE process, HANDLE thread)
+bool StepHandler::isLineChanged(const ProcessHandle& process, const ThreadHandle& thread)
 {
-	auto lineInfoOpt = SymbolExplorer::GetCurrentLineInfo(process, thread);
+	auto lineInfoOpt = process.getCurrentLineInfo(thread);
 
 	// 行情報の取得に失敗したときは同じ行とみなす
 	if (not lineInfoOpt.has_value())
@@ -35,7 +36,7 @@ bool StepHandler::isLineChanged(HANDLE process, HANDLE thread)
 	const auto& current = lineInfoOpt.value();
 	m_lastCheckedLineInfo = current;
 
-	if (current.lineNumber == m_lastLineInfoMap[thread].lineNumber && current.fileName == m_lastLineInfoMap[thread].fileName)
+	if (current.lineNumber == m_lastLineInfoMap[thread.getHandle()].lineNumber && current.fileName == m_lastLineInfoMap[thread.getHandle()].fileName)
 	{
 		return false;
 	}

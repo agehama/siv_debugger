@@ -150,10 +150,13 @@
     <ClCompile Include="ProcessDebugger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="SymbolExplorer.cpp">
+    <ClCompile Include="StepHandler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="StepHandler.cpp">
+    <ClCompile Include="ThreadHandle.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="ProcessHandle.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -794,12 +797,6 @@
     <ClInclude Include="ProcessDebugger.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="RegisterHandler.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="SymbolExplorer.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="StepHandler.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -807,6 +804,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="TypeHelper.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ThreadHandle.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="ProcessHandle.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

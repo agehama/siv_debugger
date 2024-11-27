@@ -1,5 +1,4 @@
 ﻿#include "ProcessDebugger.hpp"
-#include "RegisterHandler.hpp"
 
 bool ProcessDebugger::startDebugSession(const FilePathView exeFilePath)
 {
@@ -32,11 +31,11 @@ bool ProcessDebugger::startDebugSession(const FilePathView exeFilePath)
 		return false;
 	}
 
-	m_process = pi.hProcess;
+	m_process = ProcessHandle(pi.hProcess);
 	m_processID = pi.dwProcessId;
 	m_mainThreadID = pi.dwThreadId;
 	m_userMainThreadID = 0;
-	m_threadIDMap[m_mainThreadID] = pi.hThread;
+	m_threadIDMap[m_mainThreadID] = ThreadHandle(pi.hThread);
 	m_processStatus = ProcessStatus::Interrupted;
 
 	m_stoppedThreadID = m_mainThreadID;
@@ -56,7 +55,7 @@ void ProcessDebugger::continueDebugSession()
 
 	if (m_processStatus == ProcessStatus::Suspended)
 	{
-		ResumeThread(m_threadIDMap[m_stoppedThreadID.value()]);
+		m_threadIDMap[m_stoppedThreadID.value()].resume();
 	}
 	else
 	{
@@ -83,15 +82,16 @@ void ProcessDebugger::requestDebugBreak()
 {
 	m_requestBreak = true;
 
-	SuspendThread(m_threadIDMap[m_userMainThreadID]);
-	RegisterHandler::setTrapFlag(m_threadIDMap[m_userMainThreadID]);
+	auto& mainThread = m_threadIDMap[m_userMainThreadID];
+	mainThread.suspend();
+	mainThread.setTrapFlag();
 	m_breakPointAttacher.setBeingSingleInstruction(true);
-	ResumeThread(m_threadIDMap[m_userMainThreadID]);
+	mainThread.resume();
 }
 
 void ProcessDebugger::suspend()
 {
-	SuspendThread(m_threadIDMap[m_userMainThreadID]);
+	m_threadIDMap[m_userMainThreadID].suspend();
 	Print << U"SUSPENDED";
 	m_stoppedThreadID = m_userMainThreadID;
 }
@@ -100,7 +100,7 @@ void ProcessDebugger::resume()
 {
 	if (m_stoppedThreadID)
 	{
-		ResumeThread(m_threadIDMap[m_stoppedThreadID.value()]);
+		m_threadIDMap[m_stoppedThreadID.value()].resume();
 		m_stoppedThreadID = none;
 	}
 }
@@ -113,11 +113,10 @@ void ProcessDebugger::stepIn()
 		return;
 	}
 
-	//auto& currentThread = m_threadIDMap[m_stoppedThreadID.value()];
 	auto& currentThread = m_threadIDMap[m_userMainThreadID];
 	m_stepHandler.saveCurrentLineInfo(m_process, currentThread);
 
-	RegisterHandler::setTrapFlag(currentThread);
+	currentThread.setTrapFlag();
 	m_breakPointAttacher.setBeingSingleInstruction(true);
 
 	//continueDebugSession();
@@ -133,7 +132,7 @@ void ProcessDebugger::stepOver()
 
 	auto& currentThread = m_threadIDMap[m_userMainThreadID];
 
-	auto contextOpt = RegisterHandler::getDebuggeeContext(currentThread);
+	auto contextOpt = currentThread.getContext();
 	if (!contextOpt)
 	{
 		return;
@@ -146,7 +145,7 @@ void ProcessDebugger::stepOver()
 	m_breakPointAttacher.setBeingStepOver(true);
 
 	// CALL命令→CALLの実行後にブレーク
-	if (auto callLenhOpt = m_symbolExplorer.tryGetCallInstructionBytesLength(context.Rip))
+	if (auto callLenhOpt = m_process.tryGetCallInstructionBytesLength(context.Rip))
 	{
 		m_breakPointAttacher.setStepOverBreakPointAt(m_process, context.Rip + callLenhOpt.value());
 		m_breakPointAttacher.setBeingSingleInstruction(false);
@@ -154,7 +153,7 @@ void ProcessDebugger::stepOver()
 	// CALL以外→シングルステップ実行
 	else
 	{
-		RegisterHandler::setTrapFlag(currentThread);
+		currentThread.setTrapFlag();
 		m_breakPointAttacher.setBeingSingleInstruction(true);
 	}
 }
@@ -168,7 +167,7 @@ void ProcessDebugger::stepOut()
 	m_breakPointAttacher.setBeingSingleInstruction(false);
 
 	// 現在の関数のret命令にブレークポイントを張る
-	if (auto retOpt = m_symbolExplorer.getRetInstructionAddress(currentThread))
+	if (auto retOpt = m_process.getRetInstructionAddress(currentThread))
 	{
 		m_breakPointAttacher.setStepOutBreakPointAt(m_process, retOpt.value());
 	}
@@ -237,9 +236,9 @@ bool ProcessDebugger::onProcessCreated(const CREATE_PROCESS_DEBUG_INFO* pInfo)
 	m_breakPointAttacher.initializeBreakPointHelper();
 	m_stepHandler.initializeSingleStepHelper();
 
-	if (m_symbolExplorer.init(pInfo, m_process))
+	if (m_process.init(pInfo))
 	{
-		if (auto entryPointOpt = m_symbolExplorer.findAddress(U"Main"))
+		if (auto entryPointOpt = m_process.findAddress(U"Main"))
 		{
 			if (m_breakPointAttacher.setUserBreakPointAt(m_process, entryPointOpt.value()))
 			{
@@ -342,9 +341,9 @@ bool ProcessDebugger::onBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD thre
 	case BreakPointType::Entry:
 	{
 		m_userMainThreadID = threadID;
-		if (auto contextOpt = RegisterHandler::getDebuggeeContext(m_threadIDMap[threadID]))
+		if (auto contextOpt = m_threadIDMap[threadID].getContext())
 		{
-			m_symbolExplorer.entryFunc(contextOpt.value().Rip);
+			m_process.entryFunc(contextOpt.value().Rip);
 		}
 		handledException(true);
 		return true;
@@ -358,7 +357,7 @@ bool ProcessDebugger::onBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD thre
 
 	case BreakPointType::StepOver:
 		m_breakPointAttacher.cancelStepOverBreakPoint(m_process);
-		RegisterHandler::backDebuggeeRip(m_threadIDMap[threadID]);
+		m_threadIDMap[threadID].backRip();
 		return handleSingleStep(threadID);
 
 	case BreakPointType::StepOut:
@@ -415,10 +414,10 @@ bool ProcessDebugger::onUserBreakPoint(const EXCEPTION_DEBUG_INFO* pInfo, DWORD 
 	if (m_breakPointAttacher.recoverUserBreakPoint(m_process, breakAddress))
 	{
 		// breakpoint実行後に元の命令が実行されるように1バイト引いて戻す
-		RegisterHandler::backDebuggeeRip(m_threadIDMap[threadID]);
+		m_threadIDMap[threadID].backRip();
 
 		// 次の命令で止めてブレークポイントを復元する
-		RegisterHandler::setTrapFlag(m_threadIDMap[threadID]);
+		m_threadIDMap[threadID].setTrapFlag();
 
 		//　再セット用にアドレスを持っておく
 		m_breakPointAttacher.saveResetUserBreakPoint(breakAddress);
@@ -442,17 +441,14 @@ bool ProcessDebugger::onStepOutBreakPoint(const EXCEPTION_DEBUG_INFO*, DWORD thr
 {
 	m_breakPointAttacher.cancelStepOutBreakPoint(m_process);
 
-	RegisterHandler::backDebuggeeRip(m_threadIDMap[threadID]);
+	m_threadIDMap[threadID].backRip();
 
-	CONTEXT context = {};
-	GetThreadContext(m_threadIDMap[threadID], &context);
+	auto context = m_threadIDMap[threadID].getContext().value();
 
-	if (auto retLengthOpt = m_symbolExplorer.retInstructionLength(context.Rip))
+	if (auto retLengthOpt = m_process.retInstructionLength(context.Rip))
 	{
 		size_t retAddress;
-		size_t numOfBytes;
-		auto pAddress = reinterpret_cast<LPVOID>(context.Rip);
-		ReadProcessMemory(m_process, pAddress, &retAddress, sizeof(size_t), &numOfBytes);
+		m_process.readMemory(context.Rip, retAddress);
 
 		m_breakPointAttacher.setStepOutBreakPointAt(m_process, retAddress);
 
@@ -493,26 +489,26 @@ bool ProcessDebugger::handleSingleStep(DWORD threadID)
 	{
 		if (m_breakPointAttacher.isBeingStepOver())
 		{
-			if (auto contextOpt = RegisterHandler::getDebuggeeContext(currentThread))
+			if (auto contextOpt = currentThread.getContext())
 			{
 				auto context = contextOpt.value();
 
 				// 関数呼び出しだったら終了後にStepOverブレークポイントを張る
-				if (auto callLenOpt = m_symbolExplorer.tryGetCallInstructionBytesLength(context.Rip))
+				if (auto callLenOpt = m_process.tryGetCallInstructionBytesLength(context.Rip))
 				{
 					m_breakPointAttacher.setStepOverBreakPointAt(m_process, context.Rip + callLenOpt.value());
 					m_breakPointAttacher.setBeingSingleInstruction(false);
 				}
 				else
 				{
-					RegisterHandler::setTrapFlag(currentThread);
+					currentThread.setTrapFlag();
 					m_breakPointAttacher.setBeingSingleInstruction(true);
 				}
 			}
 		}
 		else
 		{
-			RegisterHandler::setTrapFlag(currentThread);
+			currentThread.setTrapFlag();
 			m_breakPointAttacher.setBeingSingleInstruction(true);
 		}
 
@@ -535,14 +531,13 @@ bool ProcessDebugger::onProcessExited(const EXIT_PROCESS_DEBUG_INFO* pInfo)
 	Console << U"Debuggee was terminated";
 	Console << U"Exit code: " << pInfo->dwExitCode;
 
-	m_symbolExplorer.dispose();
+	m_process.dispose();
 
 	ContinueDebugEvent(m_processID, m_mainThreadID, DBG_CONTINUE);
 
-	CloseHandle(m_threadIDMap[m_mainThreadID]);
-	CloseHandle(m_process);
+	CloseHandle(m_threadIDMap[m_mainThreadID].getHandle());
+	CloseHandle(m_process.getHandle());
 
-	m_process = NULL;
 	m_processID = 0;
 	m_mainThreadID = 0;
 	m_userMainThreadID = 0;
@@ -571,22 +566,11 @@ bool ProcessDebugger::onThreadExited(const EXIT_THREAD_DEBUG_INFO*, DWORD thread
 
 bool ProcessDebugger::onOutputDebugString(const OUTPUT_DEBUG_STRING_INFO* pInfo)
 {
-	BYTE* pBuffer = static_cast<BYTE*>(malloc(pInfo->nDebugStringLength));
+	std::string str(pInfo->nDebugStringLength, ' ');
 
-	SIZE_T bytesRead;
-	ReadProcessMemory(
-		m_process,
-		pInfo->lpDebugStringData,
-		pBuffer,
-		pInfo->nDebugStringLength,
-		&bytesRead
-	);
-
-	std::string str(reinterpret_cast<char*>(pBuffer), bytesRead);
+	m_process.readMemory(reinterpret_cast<size_t>(pInfo->lpDebugStringData), pInfo->nDebugStringLength, str.data());
 
 	Console << Unicode::FromUTF8(str);
-
-	free(pBuffer);
 
 	return true;
 }
@@ -600,12 +584,12 @@ bool ProcessDebugger::onRipEvent(const RIP_INFO*)
 
 bool ProcessDebugger::onDllLoaded(const LOAD_DLL_DEBUG_INFO* pInfo)
 {
-	m_symbolExplorer.onDllLoaded(pInfo);
+	m_process.onDllLoaded(pInfo);
 	return true;
 }
 
 bool ProcessDebugger::onDllUnloaded(const UNLOAD_DLL_DEBUG_INFO* pInfo)
 {
-	m_symbolExplorer.onDllUnloaded(pInfo);
+	m_process.onDllUnloaded(pInfo);
 	return true;
 }

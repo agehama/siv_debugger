@@ -2,8 +2,9 @@
 #include <Windows.h>
 #include <Siv3D.hpp>
 #include "BreakPointAttacher.hpp"
-#include "SymbolExplorer.hpp"
 #include "StepHandler.hpp"
+#include "ProcessHandle.hpp"
+#include "ThreadHandle.hpp"
 
 enum class ProcessStatus
 {
@@ -20,7 +21,7 @@ public:
 
 	operator bool() const
 	{
-		return m_process != NULL;
+		return m_process.getHandle() != NULL;
 	}
 
 	void requestDebugBreak();
@@ -31,7 +32,7 @@ public:
 	void stepOver();
 	void stepOut();
 
-	HANDLE process() { return m_process; }
+	const ProcessHandle& process() { return m_process; }
 
 	ProcessStatus status() { return m_processStatus; }
 
@@ -72,8 +73,8 @@ private:
 		m_continueStatus = handled ? DBG_CONTINUE : DBG_EXCEPTION_NOT_HANDLED;
 	}
 
-	HashTable<DWORD, HANDLE> m_threadIDMap;
-	HANDLE m_process = NULL;
+	HashTable<DWORD, ThreadHandle> m_threadIDMap;
+	ProcessHandle m_process;
 	DWORD m_processID = 0;
 	DWORD m_mainThreadID = 0;
 	DWORD m_userMainThreadID = 0;
@@ -81,7 +82,6 @@ private:
 	ProcessStatus m_processStatus = ProcessStatus::None;
 
 	BreakPointAttacher m_breakPointAttacher;
-	SymbolExplorer m_symbolExplorer;
 	StepHandler m_stepHandler;
 
 	bool m_alwaysContinue = false;
