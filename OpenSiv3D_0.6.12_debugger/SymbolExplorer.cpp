@@ -7,6 +7,15 @@
 #include "TypeHelper.hpp"
 #include <Siv3D.hpp>
 
+struct VariableInfo
+{
+	size_t address;
+	size_t modBase;
+	DWORD size;
+	DWORD typeID;
+	String name;
+};
+
 namespace
 {
 	// シンボルの仮想アドレスを取得する 
@@ -69,18 +78,9 @@ namespace
 		return TRUE;
 	}
 
-	struct VariableInfo
-	{
-		size_t address;
-		size_t modBase;
-		DWORD size;
-		DWORD typeID;
-		String name;
-	};
-
 	struct EnumUserData
 	{
-		Array<VariableInfo> varInfoList;
+		Array<VariableInfo> userVarInfoList;
 		HashSet<String> systemVarNameList;
 		HANDLE process;
 		CONTEXT context;
@@ -90,60 +90,61 @@ namespace
 	{
 		auto pUserData = reinterpret_cast<EnumUserData*>(UserContext);
 
-		VariableInfo varInfo;
-
 		if (pSymInfo->Tag == SymTagEnum::SymTagData)
 		{
-			varInfo.address = GetSymbolAddress(pSymInfo, pUserData->process, pUserData->context);
-			varInfo.modBase = pSymInfo->ModBase;
-			varInfo.size = SymbolSize;
-			varInfo.typeID = pSymInfo->TypeIndex;
-			varInfo.name = Unicode::FromUTF8(std::string(pSymInfo->Name));
-			if (!varInfo.name.starts_with(UR"(_)") &&
-				!varInfo.name.starts_with(UR"(std::)") &&
-				!varInfo.name.starts_with(UR"(DirectX::)") &&
-				!varInfo.name.starts_with(UR"(s3d::)") &&
-				!varInfo.name.starts_with(UR"(IID_)") &&
-				!varInfo.name.starts_with(UR"(GUID_)") &&
-				!varInfo.name.starts_with(UR"(CLSID_)") &&
-				!varInfo.name.starts_with(UR"(WPD_)") &&
-				!varInfo.name.starts_with(UR"(PKEY_)") &&
-				!varInfo.name.starts_with(UR"(MF)") &&
-				!varInfo.name.starts_with(UR"(L_)") &&
-				!varInfo.name.starts_with(UR"(TID_)") &&
-				!varInfo.name.starts_with(UR"(LIBID_)") &&
-				!varInfo.name.starts_with(UR"(DIID_)") &&
-				!varInfo.name.starts_with(UR"(s_f)") &&
-				!varInfo.name.starts_with(UR"(MMS)") &&
-				!varInfo.name.starts_with(UR"(MMI)") &&
-				!varInfo.name.starts_with(UR"(MDE_)") &&
-				!varInfo.name.starts_with(UR"(Concurrency::)") &&
-				!varInfo.name.starts_with(UR"(ENHANCED_STORAGE_)") &&
-				!varInfo.name.starts_with(UR"(MSBBUILDER_)") &&
-				!varInfo.name.starts_with(UR"(SDPBUILDER_)") &&
-				!varInfo.name.starts_with(UR"(ME_)") &&
-				!varInfo.name.starts_with(UR"(MEDIACACHE_)") &&
-				!varInfo.name.starts_with(UR"(SPROP_)") &&
-				!varInfo.name.starts_with(UR"(PPM_)") &&
-				!varInfo.name.starts_with(UR"(UnDecorator::)") &&
-				!varInfo.name.starts_with(UR"(NETSTREAMSINK_)") &&
-				!varInfo.name.starts_with(UR"(Dload)") &&
-				!varInfo.name.starts_with(UR"(MPEG4_RTP_AU_)") &&
-				!varInfo.name.starts_with(UR"(DPAID_)") &&
-				!varInfo.name.starts_with(UR"(module_)") &&
-				!varInfo.name.starts_with(UR"(DSDEVID_)") &&
-				!varInfo.name.starts_with(UR"(DDVPTYPE_)") &&
-				!varInfo.name.starts_with(UR"(DPSPGUID_)") &&
-				!varInfo.name.starts_with(UR"(FIREWALL_PORT_)") &&
-				!varInfo.name.contains(UR"($)")
+			const auto varName = Unicode::FromUTF8(std::string(pSymInfo->Name));
+			if (!varName.starts_with(UR"(_)") &&
+				!varName.starts_with(UR"(std::)") &&
+				!varName.starts_with(UR"(DirectX::)") &&
+				!varName.starts_with(UR"(s3d::)") &&
+				!varName.starts_with(UR"(IID_)") &&
+				!varName.starts_with(UR"(GUID_)") &&
+				!varName.starts_with(UR"(CLSID_)") &&
+				!varName.starts_with(UR"(WPD_)") &&
+				!varName.starts_with(UR"(PKEY_)") &&
+				!varName.starts_with(UR"(MF)") &&
+				!varName.starts_with(UR"(L_)") &&
+				!varName.starts_with(UR"(TID_)") &&
+				!varName.starts_with(UR"(LIBID_)") &&
+				!varName.starts_with(UR"(DIID_)") &&
+				!varName.starts_with(UR"(s_f)") &&
+				!varName.starts_with(UR"(MMS)") &&
+				!varName.starts_with(UR"(MMI)") &&
+				!varName.starts_with(UR"(MDE_)") &&
+				!varName.starts_with(UR"(Concurrency::)") &&
+				!varName.starts_with(UR"(ENHANCED_STORAGE_)") &&
+				!varName.starts_with(UR"(MSBBUILDER_)") &&
+				!varName.starts_with(UR"(SDPBUILDER_)") &&
+				!varName.starts_with(UR"(ME_)") &&
+				!varName.starts_with(UR"(MEDIACACHE_)") &&
+				!varName.starts_with(UR"(SPROP_)") &&
+				!varName.starts_with(UR"(PPM_)") &&
+				!varName.starts_with(UR"(UnDecorator::)") &&
+				!varName.starts_with(UR"(NETSTREAMSINK_)") &&
+				!varName.starts_with(UR"(Dload)") &&
+				!varName.starts_with(UR"(MPEG4_RTP_AU_)") &&
+				!varName.starts_with(UR"(DPAID_)") &&
+				!varName.starts_with(UR"(module_)") &&
+				!varName.starts_with(UR"(DSDEVID_)") &&
+				!varName.starts_with(UR"(DDVPTYPE_)") &&
+				!varName.starts_with(UR"(DPSPGUID_)") &&
+				!varName.starts_with(UR"(FIREWALL_PORT_)") &&
+				!varName.contains(UR"($)")
 				)
 			{
-				if (!pUserData->systemVarNameList.contains(varInfo.name))
+				if (!pUserData->systemVarNameList.contains(varName))
 				{
-					Console << U"U\"" << varInfo.name << U"\",";
+					Console << U"U\"" << varName << U"\",";
+
+					VariableInfo varInfo;
+					varInfo.address = GetSymbolAddress(pSymInfo, pUserData->process, pUserData->context);
+					varInfo.modBase = pSymInfo->ModBase;
+					varInfo.size = SymbolSize;
+					varInfo.typeID = pSymInfo->TypeIndex;
+					varInfo.name = varName;
+					pUserData->userVarInfoList.push_back(varInfo);
 				}
 			}
-			pUserData->varInfoList.push_back(varInfo);
 		}
 
 		return TRUE;
@@ -326,15 +327,22 @@ bool SymbolExplorer::init(const CREATE_PROCESS_DEBUG_INFO* pInfo, HANDLE process
 					Console << U"SymEnumSourceFilesW failed: " << GetLastError();
 				}
 
-				EnumUserData userData;
-				const auto num = sizeof(varNames) / sizeof(varNames[0]);
-				for (auto i : step(num))
+				// グローバル変数リストの取得
 				{
-					userData.systemVarNameList.emplace(varNames[i]);
-				}
-				if (not SymEnumSymbols(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, EnumVariablesCallBack, &userData))
-				{
-					Console << U"SymEnumSymbols failed: " << GetLastError();
+					EnumUserData userData;
+					const auto num = sizeof(varNames) / sizeof(varNames[0]);
+					for (auto i : step(num))
+					{
+						userData.systemVarNameList.emplace(varNames[i]);
+					}
+					if (SymEnumSymbols(m_process, (DWORD64)pInfo->lpBaseOfImage, NULL, EnumVariablesCallBack, &userData))
+					{
+						m_userGlobalVariables = std::move(userData.userVarInfoList);
+					}
+					else
+					{
+						Console << U"SymEnumSymbols failed: " << GetLastError();
+					}
 				}
 			}
 			return true;
@@ -526,7 +534,7 @@ Optional<size_t> SymbolExplorer::retInstructionLength(size_t address) const
 	return none;
 }
 
-Optional<LINE_INFO> SymbolExplorer::GetCurrentLineInfo(HANDLE process, HANDLE thread)
+Optional<LineInfo> SymbolExplorer::GetCurrentLineInfo(HANDLE process, HANDLE thread)
 {
 	auto contextOpt = RegisterHandler::getDebuggeeContext(thread);
 	if (not contextOpt)
@@ -546,7 +554,7 @@ Optional<LINE_INFO> SymbolExplorer::GetCurrentLineInfo(HANDLE process, HANDLE th
 		&displacement,
 		&lineInfo))
 	{
-		LINE_INFO currentLineInfo;
+		LineInfo currentLineInfo;
 		currentLineInfo.fileName = Unicode::FromUTF8(std::string(lineInfo.FileName));
 		currentLineInfo.lineNumber = lineInfo.LineNumber;
 		if (not currentLineInfo.fileName.ends_with(U"Main.cpp"))

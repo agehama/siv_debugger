@@ -13,14 +13,14 @@ public:
 
 	bool isLineChanged(HANDLE process, HANDLE thread);
 
-	const LINE_INFO& lastLineInfo()
+	const LineInfo& lastLineInfo()
 	{
 		return m_lastCheckedLineInfo;
 	}
 
 private:
 
-	HashTable<HANDLE, LINE_INFO> m_lastLineInfoMap; // スレッドID -> 行情報
+	HashTable<HANDLE, LineInfo> m_lastLineInfoMap; // スレッドID -> 行情報
 
-	LINE_INFO m_lastCheckedLineInfo;
+	LineInfo m_lastCheckedLineInfo;
 };

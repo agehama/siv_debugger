@@ -1,11 +1,13 @@
 ﻿#pragma once
 #include <Windows.h>
 
-struct LINE_INFO
+struct LineInfo
 {
 	String fileName;
 	size_t lineNumber;
 };
+
+struct VariableInfo;
 
 class SymbolExplorer
 {
@@ -28,11 +30,12 @@ public:
 
 	Optional<size_t> retInstructionLength(size_t address) const;
 
-	static Optional<LINE_INFO> GetCurrentLineInfo(HANDLE process, HANDLE thread);
+	static Optional<LineInfo> GetCurrentLineInfo(HANDLE process, HANDLE thread);
 
 	HANDLE getProcess() { return m_process; }
 
 private:
 
 	HANDLE m_process;
+	Array<VariableInfo> m_userGlobalVariables;
 };
