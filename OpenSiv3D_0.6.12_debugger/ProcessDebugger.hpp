@@ -32,7 +32,11 @@ public:
 	void stepOver();
 	void stepOut();
 
-	const ProcessHandle& process() { return m_process; }
+	const ProcessHandle& process() const { return m_process; }
+	ProcessHandle& process() { return m_process; }
+
+	const ThreadHandle& userThread() const { return m_threadIDMap.at(m_userMainThreadID); }
+	ThreadHandle& userThread() { return m_threadIDMap.at(m_userMainThreadID); }
 
 	ProcessStatus status() { return m_processStatus; }
 

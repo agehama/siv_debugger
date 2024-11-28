@@ -2,12 +2,18 @@
 #include "ProcessDebugger.hpp"
 #include "UserSourceFiles.hpp"
 
-enum class CommandType
+enum class OperationCommandType
 {
 	Go,
 	StepIn,
 	StepOver,
 	StepOut,
+};
+
+enum class ShowCommandType
+{
+	ShowGlovalVariables,
+	ShowLocalVariables,
 };
 
 void Main()
@@ -16,7 +22,9 @@ void Main()
 
 	Optional<String> debugProcessPath;
 
-	Optional<CommandType> command;
+	Optional<OperationCommandType> operationRequest;
+
+	Optional<ShowCommandType> showRequest;
 
 	bool isTerminate = false;
 
@@ -28,38 +36,54 @@ void Main()
 			{
 				debugger.startDebugSession(debugProcessPath.value());
 				debugProcessPath = none;
-				command = none;
+				operationRequest = none;
+				showRequest = none;
 			}
 
 			if (debugger)
 			{
 				debugger.continueDebugSession();
 
-				command = none;
-
-				while (not command && not isTerminate)
+				while (not operationRequest && not isTerminate)
 				{
+					if (showRequest)
+					{
+						switch (showRequest.value())
+						{
+						case ShowCommandType::ShowGlovalVariables:
+							debugger.process().fetchGlobalVariables();
+							break;
+						case ShowCommandType::ShowLocalVariables:
+							debugger.process().fetchLocalVariables(debugger.userThread());
+							break;
+						default: break;
+						}
+
+						showRequest = none;
+					}
+
 					std::this_thread::sleep_for(std::chrono::milliseconds(0));
 				}
 
-				if (command)
+				if (operationRequest)
 				{
-					switch (command.value())
+					switch (operationRequest.value())
 					{
-					case CommandType::Go:
+					case OperationCommandType::Go:
 						break;
-					case CommandType::StepIn:
+					case OperationCommandType::StepIn:
 						debugger.stepIn();
 						break;
-					case CommandType::StepOver:
+					case OperationCommandType::StepOver:
 						debugger.stepOver();
 						break;
-					case CommandType::StepOut:
+					case OperationCommandType::StepOut:
 						debugger.stepOut();
 						break;
-					default:
-						break;
+					default: break;
 					}
+
+					operationRequest = none;
 				}
 			}
 			else
@@ -78,7 +102,7 @@ void Main()
 		if (DragDrop::HasNewFilePaths())
 		{
 			debugProcessPath = DragDrop::GetDroppedFilePaths()[0].path;
-			command = CommandType::Go;
+			operationRequest = OperationCommandType::Go;
 		}
 
 		if (SimpleGUI::Button(U"suspend", Vec2(100, 200)))
@@ -87,22 +111,30 @@ void Main()
 		}
 		if (SimpleGUI::Button(U"resume", Vec2(300, 200)))
 		{
-			command = CommandType::Go;
+			operationRequest = OperationCommandType::Go;
 		}
 		if (SimpleGUI::Button(U"stepIn", Vec2(300, 250)))
 		{
-			command = CommandType::StepIn;
+			operationRequest = OperationCommandType::StepIn;
 		}
 		if (SimpleGUI::Button(U"stepOver", Vec2(300, 300)))
 		{
-			command = CommandType::StepOver;
+			operationRequest = OperationCommandType::StepOver;
 		}
 		if (SimpleGUI::Button(U"stepOut", Vec2(300, 350)))
 		{
-			command = CommandType::StepOut;
+			operationRequest = OperationCommandType::StepOut;
+		}
+		if (SimpleGUI::Button(U"show global", Vec2(450, 200)))
+		{
+			showRequest = ShowCommandType::ShowGlovalVariables;
+		}
+		if (SimpleGUI::Button(U"show local", Vec2(450, 250)))
+		{
+			showRequest = ShowCommandType::ShowLocalVariables;
 		}
 
-		if (not command)
+		if (not operationRequest)
 		{
 			font(U"入力待機中…").draw();
 		}
@@ -119,6 +151,8 @@ void Main()
 			{
 				font(optLineStr.value().get()).draw(0, 140);
 			}
+
+			font(debugger.process().getDebugString()).draw(0, 160);
 		}
 	}
 

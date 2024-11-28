@@ -126,6 +126,7 @@
     </ClCompile>
     <ClCompile Include="StepHandler.cpp" />
     <ClCompile Include="ThreadHandle.cpp" />
+    <ClCompile Include="TypeHelper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="App\engine\texture\box-shadow\128.png" />

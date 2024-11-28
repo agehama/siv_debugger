@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include <Windows.h>
 
 enum BaseTypeEnum {
 	btNoType = 0,
@@ -74,3 +75,13 @@ enum CBaseTypeEnum {
 	cbtDouble,
 	cbtEnd,
 };
+
+class ProcessHandle;
+
+std::wstring GetTypeName(const ProcessHandle& process, int typeID, size_t modBase);
+
+std::wstring GetTypeValue(const ProcessHandle& process, int typeID, size_t modBase, size_t address, const BYTE* pData);
+
+bool IsSimpleType(const ProcessHandle& process, DWORD typeID, size_t modBase);
+
+std::wstring GetCBaseTypeValue(CBaseTypeEnum cBaseType, const BYTE* pData);

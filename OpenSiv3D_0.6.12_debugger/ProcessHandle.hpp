@@ -66,8 +66,18 @@ public:
 		return writeMemory(address, sizeof(T), &buffer);
 	}
 
+	void fetchGlobalVariables();
+
+	void fetchLocalVariables(const ThreadHandle& thread);
+
+	const String& getDebugString() const
+	{
+		return m_debugString;
+	}
+
 private:
 
 	HANDLE m_processHandle = NULL;
 	Array<VariableInfo> m_userGlobalVariables;
+	String m_debugString;
 };

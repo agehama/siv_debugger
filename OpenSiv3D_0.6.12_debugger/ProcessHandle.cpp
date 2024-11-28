@@ -580,3 +580,92 @@ bool ProcessHandle::writeMemory(size_t address, size_t size, LPCVOID lpBuffer) c
 	auto success2 = FlushInstructionCache(m_processHandle, pAddress, size);
 	return success1 && success2;
 }
+
+String printHex(unsigned value, bool hasPrefix)
+{
+	return String(hasPrefix ? U"0x" : U"") + U"{:0>8X}"_fmt(value);
+}
+
+void showVariableSummary(const ProcessHandle& process, const VariableInfo& variable, String& str)
+{
+	str += Unicode::FromWstring(GetTypeName(process, variable.typeID, variable.modBase)) + U"  ";
+	str += Format(variable.name, U"  ", variable.size, U"  ");
+	str += printHex(variable.address, false);
+}
+
+void showVariableValue(const ProcessHandle& process, const VariableInfo& variable, String& str)
+{
+	Array<BYTE> data(variable.size);
+	process.readMemory(variable.address, variable.size, data.data());
+
+	auto wstr = GetTypeValue(process, variable.typeID, variable.modBase, variable.address, data.data());
+	str += Unicode::FromWstring(wstr);
+}
+
+String showVariables(const ProcessHandle& process, const Array<VariableInfo>& variables)
+{
+	String str;
+	if (variables.size() == 1)
+	{
+		showVariableSummary(process, variables[0], str);
+
+		str += U"  ";
+		if (not IsSimpleType(process, variables[0].typeID, variables[0].modBase))
+		{
+			str += U"\n";
+		}
+
+		showVariableValue(process, variables[0], str);
+
+		str += U"\n";
+	}
+	else
+	{
+		for (const auto& variable : variables)
+		{
+			showVariableSummary(process, variable, str);
+			if (IsSimpleType(process, variable.typeID, variable.modBase))
+			{
+				str += U"  ";
+				showVariableValue(process, variable, str);
+			}
+			str += U"\n";
+		}
+	}
+
+	return str;
+}
+
+void ProcessHandle::fetchGlobalVariables()
+{
+	m_debugString = showVariables(*this, m_userGlobalVariables);
+}
+
+void ProcessHandle::fetchLocalVariables(const ThreadHandle& thread)
+{
+	if (auto context = thread.getContext())
+	{
+		IMAGEHLP_STACK_FRAME stackFrame = {};
+		stackFrame.InstructionOffset = context.value().Rip;
+
+		if (not SymSetContext(m_processHandle, &stackFrame, NULL))
+		{
+			if (GetLastError() != ERROR_SUCCESS)
+			{
+				m_debugString = U"デバッグ情報が存在しません";
+				return;
+			}
+		}
+	}
+
+	EnumUserData userData;
+	SymEnumSymbols(
+		m_processHandle,
+		0, // BaseObDllに0を指定するとSymSetContextで指定したローカルスコープを検索する
+		NULL,
+		EnumVariablesCallBack,
+		&userData
+	);
+
+	m_debugString = showVariables(*this, userData.userVarInfoList);
+}
