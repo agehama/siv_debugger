@@ -24,7 +24,7 @@ public:
 
 	ProcessHandle() = default;
 
-	ProcessHandle(HANDLE process) :m_processHandle(process) {}
+	ProcessHandle(const FilePathView exeFilePath, HANDLE process);
 
 	void reset();
 
@@ -70,6 +70,8 @@ public:
 
 	void fetchLocalVariables(const ThreadHandle& thread);
 
+	void fetchCallstack(const ThreadHandle& thread);
+
 	const String& getDebugString() const
 	{
 		return m_debugString;
@@ -80,4 +82,5 @@ private:
 	HANDLE m_processHandle = NULL;
 	Array<VariableInfo> m_userGlobalVariables;
 	String m_debugString;
+	WORD m_machineType = 0;
 };

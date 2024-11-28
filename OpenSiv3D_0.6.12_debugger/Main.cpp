@@ -14,6 +14,7 @@ enum class ShowCommandType
 {
 	ShowGlovalVariables,
 	ShowLocalVariables,
+	ShowCallstack,
 };
 
 void Main()
@@ -55,6 +56,9 @@ void Main()
 							break;
 						case ShowCommandType::ShowLocalVariables:
 							debugger.process().fetchLocalVariables(debugger.userThread());
+							break;
+						case ShowCommandType::ShowCallstack:
+							debugger.process().fetchCallstack(debugger.userThread());
 							break;
 						default: break;
 						}
@@ -133,6 +137,10 @@ void Main()
 		{
 			showRequest = ShowCommandType::ShowLocalVariables;
 		}
+		if (SimpleGUI::Button(U"show callstack", Vec2(450, 300)))
+		{
+			showRequest = ShowCommandType::ShowCallstack;
+		}
 
 		if (not operationRequest)
 		{
@@ -152,7 +160,7 @@ void Main()
 				font(optLineStr.value().get()).draw(0, 140);
 			}
 
-			font(debugger.process().getDebugString()).draw(0, 160);
+			font(debugger.process().getDebugString()).draw(0, 400);
 		}
 	}
 

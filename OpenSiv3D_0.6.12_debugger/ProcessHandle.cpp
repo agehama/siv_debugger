@@ -289,6 +289,30 @@ namespace
 	};
 }
 
+
+ProcessHandle::ProcessHandle(const FilePathView exeFilePath, HANDLE process) :m_processHandle(process)
+{
+	auto filepathW = Unicode::ToWstring(exeFilePath);
+	// Machineタイプの識別
+	// https://tech.blog.aerie.jp/entry/2015/12/21/183741
+	auto hFile = CreateFile(filepathW.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+	auto hFileMapping = CreateFileMapping(hFile, NULL, PAGE_READONLY, 0, 0, NULL);
+	auto pvView = MapViewOfFile(hFileMapping, FILE_MAP_READ, 0, 0, 0);
+	auto pDosHeader = static_cast<IMAGE_DOS_HEADER*>(pvView);
+	if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+	{
+		Console << U"Invalid MS-DOS signature.";
+	}
+
+	auto pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(static_cast<LPBYTE>(pvView) + pDosHeader->e_lfanew);
+
+	m_machineType = pNtHeaders->FileHeader.Machine;
+
+	UnmapViewOfFile(pvView);
+	CloseHandle(hFileMapping);
+	CloseHandle(hFile);
+}
+
 void ProcessHandle::reset()
 {
 	m_processHandle = NULL;
@@ -581,7 +605,7 @@ bool ProcessHandle::writeMemory(size_t address, size_t size, LPCVOID lpBuffer) c
 	return success1 && success2;
 }
 
-String printHex(unsigned value, bool hasPrefix)
+String printHex(size_t value, bool hasPrefix)
 {
 	return String(hasPrefix ? U"0x" : U"") + U"{:0>8X}"_fmt(value);
 }
@@ -668,4 +692,60 @@ void ProcessHandle::fetchLocalVariables(const ThreadHandle& thread)
 	);
 
 	m_debugString = showVariables(*this, userData.userVarInfoList);
+}
+
+void ProcessHandle::fetchCallstack(const ThreadHandle& thread)
+{
+	m_debugString = U"";
+
+	if (auto contextOpt = thread.getContext())
+	{
+		auto& context = contextOpt.value();
+		STACKFRAME64 stackFrame = {};
+		stackFrame.AddrPC.Mode = AddrModeFlat;
+		stackFrame.AddrPC.Offset = context.Rip;
+		stackFrame.AddrStack.Mode = AddrModeFlat;
+		stackFrame.AddrStack.Offset = context.Rsp;
+		stackFrame.AddrFrame.Mode = AddrModeFlat;
+		stackFrame.AddrFrame.Offset = context.Rbp;
+
+		while (true)
+		{
+			if (not StackWalk64(
+				m_machineType,
+				m_processHandle,
+				thread.getHandle(),
+				&stackFrame,
+				&context,
+				NULL,
+				SymFunctionTableAccess64,
+				SymGetModuleBase64,
+				NULL))
+			{
+				break;
+			}
+
+			m_debugString += printHex(stackFrame.AddrPC.Offset, false) + U"  ";
+
+			BYTE buffer[sizeof(SYMBOL_INFO) + 128 * sizeof(TCHAR)] = {};
+			PSYMBOL_INFO pSymInfo = reinterpret_cast<PSYMBOL_INFO>(buffer);
+			pSymInfo->SizeOfStruct = sizeof(SYMBOL_INFO);
+			pSymInfo->MaxNameLen = 128;
+
+			DWORD64 displacement;
+
+			if (SymFromAddr(
+				m_processHandle,
+				stackFrame.AddrPC.Offset,
+				&displacement,
+				pSymInfo))
+			{
+				m_debugString += Unicode::FromUTF8(std::string(pSymInfo->Name)) + U"\n";
+			}
+			else
+			{
+				m_debugString += U"??\n";
+			}
+		}
+	}
 }

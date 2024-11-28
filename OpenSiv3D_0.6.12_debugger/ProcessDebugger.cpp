@@ -8,13 +8,15 @@ bool ProcessDebugger::startDebugSession(const FilePathView exeFilePath)
 		return false;
 	}
 
+	auto filepathW = Unicode::ToWstring(exeFilePath);
+
 	STARTUPINFO si = {};
 	si.cb = sizeof(si);
 
 	PROCESS_INFORMATION pi = {};
 
 	if (not CreateProcess(
-		Unicode::ToWstring(exeFilePath).c_str(),
+		filepathW.c_str(),
 		NULL,
 		NULL,
 		NULL,
@@ -31,7 +33,7 @@ bool ProcessDebugger::startDebugSession(const FilePathView exeFilePath)
 		return false;
 	}
 
-	m_process = ProcessHandle(pi.hProcess);
+	m_process = ProcessHandle(exeFilePath, pi.hProcess);
 	m_processID = pi.dwProcessId;
 	m_mainThreadID = pi.dwThreadId;
 	m_userMainThreadID = 0;
